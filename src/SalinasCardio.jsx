@@ -6,8 +6,8 @@ import {
 } from "lucide-react";
 import { collection, addDoc, onSnapshot, orderBy, query as fsQuery, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { signOut } from "firebase/auth";
-import { auth, db, storage } from "./firebase";
+import { signOut, signInWithPopup } from "firebase/auth";
+import { auth, db, storage, googleProvider } from "./firebase";
 
 /* ============================================================
    SALINAS CARDIO — teaching library (v2, column board)
@@ -51,6 +51,22 @@ export default function SalinasCardio({ user }) {
   const [activeTag, setActiveTag] = useState(null);
   const [upload, setUpload] = useState(null);
   const [playingId, setPlayingId] = useState(null);
+  const [openItemId, setOpenItemId] = useState(null);
+
+  const ensureSignedIn = async () => {
+    if (user) return user;
+    const cred = await signInWithPopup(auth, googleProvider);
+    return cred.user;
+  };
+
+  const openUpload = async (category) => {
+    try {
+      await ensureSignedIn();
+      setUpload({ category });
+    } catch {
+      // user closed/cancelled the sign-in popup
+    }
+  };
 
   useEffect(() => {
     const q = fsQuery(collection(db, "items"), orderBy("createdAt", "desc"));
@@ -126,12 +142,18 @@ export default function SalinasCardio({ user }) {
             <a href={WHATSAPP_LINK} target="_blank" rel="noreferrer" style={S.waBtn}>
               <MessageCircle size={16} /> Discussion
             </a>
-            <button style={S.uploadBtn} onClick={() => setUpload({ category: "articles" })}>
+            <button style={S.uploadBtn} onClick={() => openUpload("articles")}>
               <Plus size={16} /> Upload
             </button>
-            <button style={S.signOutBtn} onClick={() => signOut(auth)} aria-label="Sign out" title={`Signed in as ${user.displayName || user.email}`}>
-              <LogOut size={16} />
-            </button>
+            {user ? (
+              <button style={S.signOutBtn} onClick={() => signOut(auth)} aria-label="Sign out" title={`Signed in as ${user.displayName || user.email}`}>
+                <LogOut size={16} />
+              </button>
+            ) : (
+              <button style={S.signInBtn} onClick={() => signInWithPopup(auth, googleProvider)}>
+                Sign in
+              </button>
+            )}
           </div>
         </div>
 
@@ -182,7 +204,7 @@ export default function SalinasCardio({ user }) {
                     <span style={S.colCount}>{laneItems.length}</span>
                   </div>
                   <button style={{ ...S.colAdd, color: lane.accent, borderColor: `${lane.accent}55` }}
-                    onClick={() => setUpload({ category: lane.defaultCat })}>
+                    onClick={() => openUpload(lane.defaultCat)}>
                     <Plus size={14} /> Add
                   </button>
                 </div>
@@ -194,7 +216,8 @@ export default function SalinasCardio({ user }) {
                       <ColumnItem key={item.id} item={item}
                         playing={playingId === item.id}
                         onPlay={() => setPlayingId(playingId === item.id ? null : item.id)}
-                        onTag={setActiveTag} />
+                        onTag={setActiveTag}
+                        onOpen={() => setOpenItemId(item.id)} />
                     ))
                   )}
                 </div>
@@ -211,18 +234,28 @@ export default function SalinasCardio({ user }) {
               <GridCard key={item.id} item={item}
                 playing={playingId === item.id}
                 onPlay={() => setPlayingId(playingId === item.id ? null : item.id)}
-                onTag={setActiveTag} />
+                onTag={setActiveTag}
+                onOpen={() => setOpenItemId(item.id)} />
             ))
           )}
         </main>
       )}
 
       {upload && <UploadModal initialCategory={upload.category} onClose={() => setUpload(null)} onAdd={addItem} />}
+      {openItemId && (
+        <DetailModal
+          item={items.find((i) => i.id === openItemId) || null}
+          user={user}
+          ensureSignedIn={ensureSignedIn}
+          onClose={() => setOpenItemId(null)}
+          onTag={setActiveTag}
+        />
+      )}
     </div>
   );
 }
 
-function ColumnItem({ item, playing, onPlay, onTag }) {
+function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
   const cat = catById(item.category);
   const Icon = cat.icon;
   const ytId = item.fileType === "youtube" ? youtubeId(item.fileUrl) : null;
@@ -253,12 +286,15 @@ function ColumnItem({ item, playing, onPlay, onTag }) {
         </a>
       )}
       <div style={S.rowMain}>
-        <h3 style={S.rowTitle}>{item.title}</h3>
+        <h3 style={{ ...S.rowTitle, cursor: "pointer" }} onClick={onOpen}>{item.title}</h3>
         {item.notes && <p style={S.rowNotes}>{item.notes}</p>}
         <div style={S.rowTags}>
           {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => onTag(t)}>{t}</button>)}
         </div>
-        <div style={S.rowMeta}><User size={11} color="#93A1AC" /> {item.uploaderName} · {timeAgo(item.createdAt)}</div>
+        <div style={S.rowMeta}>
+          <User size={11} color="#93A1AC" /> {item.uploaderName} · {timeAgo(item.createdAt)}
+          <button style={S.discussBtn} onClick={onOpen}><MessageCircle size={11} /> Discuss</button>
+        </div>
         {playing && ytId && (
           <div style={S.ytEmbedRow}>
             <iframe
@@ -274,7 +310,7 @@ function ColumnItem({ item, playing, onPlay, onTag }) {
   );
 }
 
-function GridCard({ item, playing, onPlay, onTag }) {
+function GridCard({ item, playing, onPlay, onTag, onOpen }) {
   const cat = catById(item.category);
   const Icon = cat.icon;
   const ytId = item.fileType === "youtube" ? youtubeId(item.fileUrl) : null;
@@ -313,10 +349,13 @@ function GridCard({ item, playing, onPlay, onTag }) {
         <span style={{ ...S.catTag, color: cat.accent, borderColor: `${cat.accent}44` }}>{cat.label}</span>
       </div>
       <div style={S.cardBody}>
-        <h3 style={S.cardTitle}>{item.title}</h3>
+        <h3 style={{ ...S.cardTitle, cursor: "pointer" }} onClick={onOpen}>{item.title}</h3>
         {item.notes && <p style={S.cardNotes}>{item.notes}</p>}
         <div style={S.cardTags}>{item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => onTag(t)}>{t}</button>)}</div>
-        <div style={S.cardMeta}><User size={12} color="#93A1AC" /> {item.uploaderName}<span style={S.metaDot}>·</span>{timeAgo(item.createdAt)}</div>
+        <div style={S.cardMeta}>
+          <User size={12} color="#93A1AC" /> {item.uploaderName}<span style={S.metaDot}>·</span>{timeAgo(item.createdAt)}
+          <button style={S.discussBtnCard} onClick={onOpen}><MessageCircle size={12} /> Discuss</button>
+        </div>
       </div>
       {playing && item.fileType === "audio" && <audio src={item.fileUrl} autoPlay onEnded={onPlay} style={{ display: "none" }} />}
     </article>
@@ -458,6 +497,110 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
   );
 }
 
+function DetailModal({ item, user, ensureSignedIn, onClose, onTag }) {
+  const [comments, setComments] = useState([]);
+  const [text, setText] = useState("");
+  const [posting, setPosting] = useState(false);
+
+  useEffect(() => {
+    if (!item) return;
+    const q = fsQuery(collection(db, "items", item.id, "comments"), orderBy("createdAt", "asc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setComments(snap.docs.map((d) => {
+        const data = d.data();
+        return { id: d.id, ...data, createdAt: data.createdAt?.toMillis ? data.createdAt.toMillis() : Date.now() };
+      }));
+    });
+    return unsub;
+  }, [item?.id]);
+
+  if (!item) return null;
+  const cat = catById(item.category);
+  const ytId = item.fileType === "youtube" ? youtubeId(item.fileUrl) : null;
+
+  const postComment = async () => {
+    if (!text.trim() || posting) return;
+    setPosting(true);
+    try {
+      const activeUser = await ensureSignedIn();
+      await addDoc(collection(db, "items", item.id, "comments"), {
+        text: text.trim(),
+        authorName: activeUser.displayName || activeUser.email,
+        authorId: activeUser.uid,
+        createdAt: serverTimestamp(),
+      });
+      setText("");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.detailModal} onClick={(e) => e.stopPropagation()}>
+        <div style={S.modalHead}>
+          <h2 style={S.modalTitle}>{item.title}</h2>
+          <button style={S.closeBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={S.detailMetaRow}>
+          <span style={{ ...S.catTag, position: "static", color: cat.accent, borderColor: `${cat.accent}44` }}>{cat.label}</span>
+          <span style={S.rowMeta}><User size={12} color="#93A1AC" /> {item.uploaderName} · {timeAgo(item.createdAt)}</span>
+        </div>
+
+        <div style={S.detailMedia}>
+          {item.category === "ekg" && item.fileUrl && <img src={item.fileUrl} alt={item.title} style={S.detailImg} />}
+          {item.fileType === "audio" && <audio src={item.fileUrl} controls style={{ width: "100%" }} />}
+          {item.fileType === "youtube" && ytId && (
+            <iframe
+              style={S.detailYtIframe}
+              src={`https://www.youtube-nocookie.com/embed/${ytId}`}
+              title={item.title} allow="autoplay; encrypted-media" allowFullScreen
+            />
+          )}
+          {item.fileType === "pdf" && item.fileUrl && (
+            <a href={item.fileUrl} target="_blank" rel="noreferrer" style={S.detailPdfLink}>
+              <FileText size={18} /> Open document
+            </a>
+          )}
+        </div>
+
+        {item.notes && <p style={S.detailNotes}>{item.notes}</p>}
+        <div style={S.rowTags}>
+          {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => { onTag(t); onClose(); }}>{t}</button>)}
+        </div>
+
+        <div style={S.commentsSection}>
+          <h3 style={S.commentsHeading}>Discussion</h3>
+          {comments.length === 0 && <div style={S.colEmpty}>No comments yet — be the first to add a clarification.</div>}
+          {comments.map((c) => (
+            <div key={c.id} style={S.commentRow}>
+              <div style={S.commentMeta}><strong>{c.authorName}</strong> · {timeAgo(c.createdAt)}</div>
+              <div style={S.commentText}>{c.text}</div>
+            </div>
+          ))}
+          {user ? (
+            <div style={S.commentInputRow}>
+              <textarea
+                style={{ ...S.input, minHeight: 50, resize: "vertical" }}
+                value={text} onChange={(e) => setText(e.target.value)}
+                placeholder="Add a comment or clarification..."
+              />
+              <button style={{ ...S.uploadBtn, alignSelf: "flex-end", opacity: text.trim() && !posting ? 1 : 0.5 }} onClick={postComment} disabled={posting || !text.trim()}>
+                {posting ? "Posting…" : "Post"}
+              </button>
+            </div>
+          ) : (
+            <button style={{ ...S.uploadBtn, width: "100%", justifyContent: "center", marginTop: 8 }} onClick={() => ensureSignedIn()}>
+              Sign in with Google to comment
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function timeAgo(ts) {
   const d = Math.floor((Date.now() - ts) / 86400000);
   if (d === 0) return "today";
@@ -476,6 +619,7 @@ const S = {
   waBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "transparent", border: "1px solid #2E4A57", color: "#CFE0E7", padding: "9px 14px", borderRadius: 9, fontSize: 14, fontWeight: 500, cursor: "pointer", textDecoration: "none" },
   uploadBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "#5F9AB0", border: "none", color: "#062028", padding: "9px 15px", borderRadius: 9, fontSize: 14, fontWeight: 600, cursor: "pointer" },
   signOutBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid #2E4A57", color: "#CFE0E7", width: 38, height: 38, borderRadius: 9, cursor: "pointer" },
+  signInBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "transparent", border: "1px solid #2E4A57", color: "#CFE0E7", padding: "9px 14px", borderRadius: 9, fontSize: 14, fontWeight: 500, cursor: "pointer" },
   controls: { maxWidth: 1240, margin: "16px auto 0", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" },
   searchWrap: { flex: 1, minWidth: 220, background: "#fff", borderRadius: 11, padding: "0 14px", display: "flex", alignItems: "center", gap: 10, height: 46 },
   search: { flex: 1, border: "none", outline: "none", fontSize: 15, background: "transparent", color: "#12232C" },
@@ -511,6 +655,7 @@ const S = {
   rowNotes: { fontSize: 12, color: "#6B7A85", margin: "4px 0 0", lineHeight: 1.4 },
   rowTags: { display: "flex", gap: 5, flexWrap: "wrap", margin: "8px 0 0" },
   rowMeta: { fontSize: 11, color: "#93A1AC", marginTop: 8, display: "flex", alignItems: "center", gap: 4 },
+  discussBtn: { display: "inline-flex", alignItems: "center", gap: 3, border: "none", background: "none", color: "#8A5A9E", fontSize: 11, fontWeight: 600, cursor: "pointer", marginLeft: "auto", padding: 0 },
   ytEmbedRow: { marginTop: 10 },
   ytIframe: { width: "100%", height: "100%", border: "none", borderRadius: 8 },
 
@@ -531,6 +676,7 @@ const S = {
   cardNotes: { fontSize: 13, color: "#5A6B78", margin: "6px 0 0", lineHeight: 1.45 },
   cardTags: { display: "flex", gap: 6, flexWrap: "wrap", margin: "11px 0 0" },
   cardMeta: { display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#93A1AC", marginTop: 12 },
+  discussBtnCard: { display: "inline-flex", alignItems: "center", gap: 3, border: "none", background: "none", color: "#8A5A9E", fontSize: 11.5, fontWeight: 600, cursor: "pointer", marginLeft: "auto", padding: 0 },
   metaDot: { margin: "0 2px" },
   miniTag: { fontSize: 11, background: "#F0F3F1", border: "none", color: "#4E6270", borderRadius: 5, padding: "3px 8px", cursor: "pointer", fontWeight: 500 },
 
@@ -550,6 +696,21 @@ const S = {
   errorText: { color: "#B4573A", fontSize: 12.5, marginTop: 6 },
   progressTrack: { height: 6, background: "#EEF1F0", borderRadius: 999, marginTop: 12, overflow: "hidden" },
   progressFill: { height: "100%", background: "#5F9AB0", transition: "width 0.15s linear" },
+
+  detailModal: { background: "#fff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto" },
+  detailMetaRow: { display: "flex", alignItems: "center", gap: 12, marginBottom: 14 },
+  detailMedia: { marginBottom: 14 },
+  detailImg: { width: "100%", borderRadius: 10, display: "block" },
+  detailYtIframe: { width: "100%", height: 280, border: "none", borderRadius: 10 },
+  detailPdfLink: { display: "inline-flex", alignItems: "center", gap: 8, background: "#F0F3F1", color: "#12232C", borderRadius: 9, padding: "10px 14px", fontSize: 14, fontWeight: 600, textDecoration: "none" },
+  detailNotes: { fontSize: 14, color: "#3A4A54", lineHeight: 1.5, margin: "0 0 10px" },
+
+  commentsSection: { marginTop: 20, paddingTop: 16, borderTop: "1px solid #EAEDEB" },
+  commentsHeading: { fontSize: 14, fontWeight: 700, margin: "0 0 10px", color: "#12232C" },
+  commentRow: { padding: "8px 0", borderBottom: "1px solid #F0F3F1" },
+  commentMeta: { fontSize: 12, color: "#7B8794", marginBottom: 3 },
+  commentText: { fontSize: 13.5, color: "#12232C", lineHeight: 1.45, whiteSpace: "pre-wrap" },
+  commentInputRow: { display: "flex", flexDirection: "column", gap: 8, marginTop: 12 },
 };
 
 const GLOBAL_CSS = `
