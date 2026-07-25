@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { collection, addDoc, onSnapshot, orderBy, query as fsQuery, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { signOut, signInWithPopup } from "firebase/auth";
+import { signOut, signInWithPopup, sendSignInLinkToEmail } from "firebase/auth";
 import { auth, db, storage, googleProvider } from "./firebase";
 
 /* ============================================================
@@ -52,20 +52,11 @@ export default function SalinasCardio({ user }) {
   const [upload, setUpload] = useState(null);
   const [playingId, setPlayingId] = useState(null);
   const [openItemId, setOpenItemId] = useState(null);
+  const [signInPromptOpen, setSignInPromptOpen] = useState(false);
 
-  const ensureSignedIn = async () => {
-    if (user) return user;
-    const cred = await signInWithPopup(auth, googleProvider);
-    return cred.user;
-  };
-
-  const openUpload = async (category) => {
-    try {
-      await ensureSignedIn();
-      setUpload({ category });
-    } catch {
-      // user closed/cancelled the sign-in popup
-    }
+  const openUpload = (category) => {
+    if (!user) { setSignInPromptOpen(true); return; }
+    setUpload({ category });
   };
 
   useEffect(() => {
@@ -150,7 +141,7 @@ export default function SalinasCardio({ user }) {
                 <LogOut size={16} />
               </button>
             ) : (
-              <button style={S.signInBtn} onClick={() => signInWithPopup(auth, googleProvider)}>
+              <button style={S.signInBtn} onClick={() => setSignInPromptOpen(true)}>
                 Sign in
               </button>
             )}
@@ -246,11 +237,12 @@ export default function SalinasCardio({ user }) {
         <DetailModal
           item={items.find((i) => i.id === openItemId) || null}
           user={user}
-          ensureSignedIn={ensureSignedIn}
+          onRequestSignIn={() => setSignInPromptOpen(true)}
           onClose={() => setOpenItemId(null)}
           onTag={setActiveTag}
         />
       )}
+      {signInPromptOpen && <SignInModal onClose={() => setSignInPromptOpen(false)} />}
     </div>
   );
 }
@@ -497,7 +489,7 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
   );
 }
 
-function DetailModal({ item, user, ensureSignedIn, onClose, onTag }) {
+function DetailModal({ item, user, onRequestSignIn, onClose, onTag }) {
   const [comments, setComments] = useState([]);
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
@@ -519,14 +511,13 @@ function DetailModal({ item, user, ensureSignedIn, onClose, onTag }) {
   const ytId = item.fileType === "youtube" ? youtubeId(item.fileUrl) : null;
 
   const postComment = async () => {
-    if (!text.trim() || posting) return;
+    if (!text.trim() || posting || !user) return;
     setPosting(true);
     try {
-      const activeUser = await ensureSignedIn();
       await addDoc(collection(db, "items", item.id, "comments"), {
         text: text.trim(),
-        authorName: activeUser.displayName || activeUser.email,
-        authorId: activeUser.uid,
+        authorName: user.displayName || user.email,
+        authorId: user.uid,
         createdAt: serverTimestamp(),
       });
       setText("");
@@ -591,11 +582,77 @@ function DetailModal({ item, user, ensureSignedIn, onClose, onTag }) {
               </button>
             </div>
           ) : (
-            <button style={{ ...S.uploadBtn, width: "100%", justifyContent: "center", marginTop: 8 }} onClick={() => ensureSignedIn()}>
-              Sign in with Google to comment
+            <button style={{ ...S.uploadBtn, width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onRequestSignIn}>
+              Sign in to comment
             </button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SignInModal({ onClose }) {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  const withGoogle = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+      onClose();
+    } catch {
+      // user closed/cancelled the popup
+    }
+  };
+
+  const sendLink = async () => {
+    if (!email.trim() || sending) return;
+    setSending(true);
+    setError("");
+    try {
+      await sendSignInLinkToEmail(auth, email.trim(), {
+        url: window.location.href,
+        handleCodeInApp: true,
+      });
+      window.localStorage.setItem("emailForSignIn", email.trim());
+      setSent(true);
+    } catch (err) {
+      setError(err.message || "Couldn't send the link. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+        <div style={S.modalHead}>
+          <h2 style={S.modalTitle}>Sign in</h2>
+          <button style={S.closeBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+        <button style={{ ...S.uploadBtn, width: "100%", justifyContent: "center" }} onClick={withGoogle}>
+          Continue with Google
+        </button>
+        <div style={S.signInDivider}>or</div>
+        {sent ? (
+          <div style={S.colEmpty}>Check <strong>{email}</strong> for a sign-in link.</div>
+        ) : (
+          <>
+            <label style={S.field}>
+              <span style={S.fieldLabel}>Institutional or personal email</span>
+              <input style={S.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@utrgv.edu" disabled={sending} />
+            </label>
+            {error && <div style={S.errorText}>{error}</div>}
+            <button
+              style={{ ...S.sourceToggleBtn, width: "100%", background: "#12232C", color: "#fff", borderColor: "#12232C", opacity: email.trim() && !sending ? 1 : 0.5 }}
+              onClick={sendLink} disabled={sending || !email.trim()}
+            >
+              {sending ? "Sending…" : "Email me a sign-in link"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -693,6 +750,7 @@ const S = {
   sourceToggle: { display: "flex", gap: 6, marginBottom: 10 },
   sourceToggleBtn: { flex: 1, border: "1px solid #DDE3E1", background: "#fff", color: "#5A6B78", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontWeight: 600, cursor: "pointer" },
   sourceToggleBtnActive: { background: "#12232C", color: "#fff", borderColor: "#12232C" },
+  signInDivider: { textAlign: "center", color: "#93A1AC", fontSize: 12, margin: "14px 0" },
   errorText: { color: "#B4573A", fontSize: 12.5, marginTop: 6 },
   progressTrack: { height: 6, background: "#EEF1F0", borderRadius: 999, marginTop: 12, overflow: "hidden" },
   progressFill: { height: "100%", background: "#5F9AB0", transition: "width 0.15s linear" },
