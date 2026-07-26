@@ -8,7 +8,7 @@ import {
   collection, addDoc, onSnapshot, orderBy, query as fsQuery, serverTimestamp,
   doc, updateDoc, deleteDoc, setDoc, getDocs,
 } from "firebase/firestore";
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
+import { ref, uploadBytesResumable, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { signOut, signInWithPopup, sendSignInLinkToEmail } from "firebase/auth";
 import { auth, db, storage, googleProvider } from "./firebase";
 
@@ -44,6 +44,12 @@ const laneOfCat = (id) => catById(id)?.lane;
 function youtubeId(url) {
   const m = (url || "").match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/);
   return m ? m[1] : null;
+}
+
+function getMedia(item) {
+  if (item.media?.length) return item.media;
+  if (item.fileUrl) return [{ url: item.fileUrl, storagePath: item.storagePath, type: "image" }];
+  return [];
 }
 
 const WHATSAPP_LINK = "https://chat.whatsapp.com/your-group-invite";
@@ -110,7 +116,7 @@ export default function SalinasCardio({ user }) {
 
   const byLane = (lane) => filtered.filter((i) => laneOfCat(i.category) === lane);
 
-  const addItem = async ({ file, fileUrl: providedUrl, ...meta }, onProgress) => {
+  const addItem = async ({ file, fileUrl: providedUrl, mediaFiles, ...meta }, onProgress) => {
     let fileUrl = providedUrl || "";
     let storagePath = "";
     if (file) {
@@ -128,10 +134,33 @@ export default function SalinasCardio({ user }) {
       fileUrl = await getDownloadURL(storageRef);
     }
 
+    let media = [];
+    if (mediaFiles && mediaFiles.length) {
+      const totalBytes = mediaFiles.reduce((sum, f) => sum + f.size, 0);
+      let doneBytes = 0;
+      for (let i = 0; i < mediaFiles.length; i++) {
+        const f = mediaFiles[i];
+        const path = `${meta.category}/${Date.now()}-${i}-${f.name}`;
+        const storageRef = ref(storage, path);
+        const task = uploadBytesResumable(storageRef, f);
+        await new Promise((resolve, reject) => {
+          task.on(
+            "state_changed",
+            (snap) => onProgress?.((doneBytes + snap.bytesTransferred) / totalBytes),
+            reject,
+            () => { doneBytes += f.size; resolve(); }
+          );
+        });
+        const url = await getDownloadURL(storageRef);
+        media.push({ url, storagePath: path, type: f.type.startsWith("video/") ? "video" : "image" });
+      }
+    }
+
     await addDoc(collection(db, "items"), {
       ...meta,
       fileUrl,
       storagePath,
+      ...(media.length ? { media } : {}),
       uploaderId: user.uid,
       createdAt: serverTimestamp(),
     });
@@ -276,6 +305,7 @@ function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
   const cat = catById(item.category);
   const Icon = cat.icon;
   const ytId = item.fileType === "youtube" ? youtubeId(item.fileUrl) : null;
+  const media = item.category === "questions" ? getMedia(item) : [];
   return (
     <article style={S.rowCard}>
       {item.category === "ekg" ? (
@@ -298,9 +328,16 @@ function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
           </span>
         </button>
       ) : item.category === "questions" ? (
-        item.fileUrl
-          ? <div style={S.rowEkg}><img src={item.fileUrl} alt={item.title} style={S.thumbImg} /></div>
-          : <div style={{ ...S.rowThumb, background: `${cat.accent}14` }}><Icon size={20} color={cat.accent} strokeWidth={1.6} /></div>
+        media.length > 0 ? (
+          <div style={S.rowEkg}>
+            {media[0].type === "video"
+              ? <video style={S.thumbImg} src={media[0].url} muted preload="metadata" />
+              : <img src={media[0].url} alt={item.title} style={S.thumbImg} />}
+            {media.length > 1 && <span style={S.mediaBadge}>+{media.length - 1}</span>}
+          </div>
+        ) : (
+          <div style={{ ...S.rowThumb, background: `${cat.accent}14` }}><Icon size={20} color={cat.accent} strokeWidth={1.6} /></div>
+        )
       ) : (
         <a href={item.fileUrl} target="_blank" rel="noreferrer" style={{ ...S.rowThumb, background: `${cat.accent}14` }}>
           <Icon size={20} color={cat.accent} strokeWidth={1.6} />
@@ -337,6 +374,7 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
   const cat = catById(item.category);
   const Icon = cat.icon;
   const ytId = item.fileType === "youtube" ? youtubeId(item.fileUrl) : null;
+  const media = item.category === "questions" ? getMedia(item) : [];
   return (
     <article style={S.card}>
       <div style={{ ...S.cardTop, background: `${cat.accent}0F`, ...(item.fileType === "youtube" && playing ? S.cardTopExpanded : {}) }}>
@@ -365,9 +403,16 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
               {playing && <Waveform color={cat.accent} />}
             </button>
           ) : item.category === "questions" ? (
-            item.fileUrl
-              ? <img src={item.fileUrl} alt={item.title} style={S.cardImg} />
-              : <div style={S.docPreview}><Icon size={34} color={cat.accent} strokeWidth={1.5} /></div>
+            media.length > 0 ? (
+              <>
+                {media[0].type === "video"
+                  ? <video style={S.cardImg} src={media[0].url} muted preload="metadata" />
+                  : <img src={media[0].url} alt={item.title} style={S.cardImg} />}
+                {media.length > 1 && <span style={S.mediaBadgeCard}>+{media.length - 1}</span>}
+              </>
+            ) : (
+              <div style={S.docPreview}><Icon size={34} color={cat.accent} strokeWidth={1.5} /></div>
+            )
           ) : (
             <a href={item.fileUrl} target="_blank" rel="noreferrer" style={S.docPreview}>
               <Icon size={34} color={cat.accent} strokeWidth={1.5} />
@@ -418,11 +463,13 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
   const [answer, setAnswer] = useState("");
   const [uploader, setUploader] = useState("");
   const [file, setFile] = useState(null);
+  const [mediaFiles, setMediaFiles] = useState([]);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null); // null = idle, 0-1 while uploading
   const [sourceMode, setSourceMode] = useState("file"); // "file" | "youtube" (murmurs only)
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const fileRef = useRef();
+  const mediaRef = useRef();
 
   const isYoutube = category === "murmurs" && sourceMode === "youtube";
   const isQuestions = category === "questions";
@@ -440,6 +487,16 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
     setFile(f);
   };
 
+  const onMediaFilesChange = (e) => {
+    const picked = Array.from(e.target.files || []);
+    const oversized = picked.filter((f) => f.size > MAX_FILE_BYTES);
+    setFileError(oversized.length ? `${oversized.length} file(s) skipped — over ${MAX_FILE_BYTES / (1024 * 1024)}MB limit.` : "");
+    setMediaFiles((prev) => [...prev, ...picked.filter((f) => f.size <= MAX_FILE_BYTES)]);
+    e.target.value = "";
+  };
+
+  const removeMediaFile = (index) => setMediaFiles((prev) => prev.filter((_, i) => i !== index));
+
   const submit = async () => {
     if (!title.trim() || !uploader.trim() || progress !== null) return;
     if (isYoutube && !youtubeId(youtubeUrl.trim())) {
@@ -453,14 +510,15 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
     const fileType = isYoutube ? "youtube"
       : category === "murmurs" ? "audio"
       : category === "ekg" ? "image"
-      : isQuestions ? (file ? "image" : "")
+      : isQuestions ? ""
       : "pdf";
     setProgress(0);
     try {
       await onAdd(
         {
-          file: isYoutube ? null : file,
+          file: isYoutube || isQuestions ? null : file,
           fileUrl: isYoutube ? youtubeUrl.trim() : undefined,
+          mediaFiles: isQuestions ? mediaFiles : undefined,
           title: title.trim(), category,
           tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
           notes: notes.trim(), uploaderName: uploader.trim(), fileType,
@@ -530,10 +588,28 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
             <span style={S.fieldLabel}>YouTube link</span>
             <input style={S.input} value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} placeholder="https://youtube.com/watch?v=..." disabled={busy} />
           </label>
+        ) : isQuestions ? (
+          <>
+            <div style={{ ...S.dropzone, opacity: busy ? 0.6 : 1 }} onClick={() => !busy && mediaRef.current?.click()}>
+              <Upload size={18} color="#5A6B78" />
+              <span>Attach images or videos (optional, multiple allowed)</span>
+              <input ref={mediaRef} type="file" accept="image/*,video/*" multiple style={{ display: "none" }} onChange={onMediaFilesChange} disabled={busy} />
+            </div>
+            {mediaFiles.length > 0 && (
+              <div style={S.mediaFileList}>
+                {mediaFiles.map((f, i) => (
+                  <div key={i} style={S.mediaFileRow}>
+                    <span>{f.name}</span>
+                    <button type="button" style={S.discussBtn} onClick={() => removeMediaFile(i)} disabled={busy}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         ) : (
           <div style={{ ...S.dropzone, opacity: busy ? 0.6 : 1 }} onClick={() => !busy && fileRef.current?.click()}>
             <Upload size={18} color="#5A6B78" />
-            <span>{file?.name || (isQuestions ? "Attach an image to the question (optional)" : "Choose file (PDF, image, or audio)")}</span>
+            <span>{file?.name || "Choose file (PDF, image, or audio)"}</span>
             <input ref={fileRef} type="file" style={{ display: "none" }} onChange={onFileChange} disabled={busy} />
           </div>
         )}
@@ -564,6 +640,9 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
   const [editNotes, setEditNotes] = useState("");
   const [editQuestion, setEditQuestion] = useState("");
   const [editAnswer, setEditAnswer] = useState("");
+  const [editExistingMedia, setEditExistingMedia] = useState([]);
+  const [editNewMediaFiles, setEditNewMediaFiles] = useState([]);
+  const editMediaRef = useRef();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -581,6 +660,7 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
   if (!item) return null;
   const cat = catById(item.category);
   const ytId = item.fileType === "youtube" ? youtubeId(item.fileUrl) : null;
+  const media = item.category === "questions" ? getMedia(item) : [];
 
   const postComment = async () => {
     if (!text.trim() || posting || !user) return;
@@ -609,7 +689,15 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
     setEditNotes(item.notes || "");
     setEditQuestion(item.question || "");
     setEditAnswer(item.answer || "");
+    setEditExistingMedia(media);
+    setEditNewMediaFiles([]);
     setEditing(true);
+  };
+
+  const onEditMediaFilesChange = (e) => {
+    const picked = Array.from(e.target.files || []);
+    setEditNewMediaFiles((prev) => [...prev, ...picked.filter((f) => f.size <= MAX_FILE_BYTES)]);
+    e.target.value = "";
   };
 
   const saveEdit = async () => {
@@ -617,12 +705,30 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
     const editIsQuestions = editCategory === "questions";
     setSaving(true);
     try {
+      let finalMedia;
+      if (editIsQuestions) {
+        const keptPaths = new Set(editExistingMedia.map((m) => m.storagePath).filter(Boolean));
+        const removed = media.filter((m) => m.storagePath && !keptPaths.has(m.storagePath));
+        for (const m of removed) {
+          try { await deleteObject(ref(storage, m.storagePath)); } catch { /* already gone */ }
+        }
+        const uploadedNew = [];
+        for (let i = 0; i < editNewMediaFiles.length; i++) {
+          const f = editNewMediaFiles[i];
+          const path = `${editCategory}/${Date.now()}-${i}-${f.name}`;
+          const storageRef = ref(storage, path);
+          await uploadBytes(storageRef, f);
+          const url = await getDownloadURL(storageRef);
+          uploadedNew.push({ url, storagePath: path, type: f.type.startsWith("video/") ? "video" : "image" });
+        }
+        finalMedia = [...editExistingMedia, ...uploadedNew];
+      }
       await updateDoc(doc(db, "items", item.id), {
         title: editTitle.trim(),
         category: editCategory,
         tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
         notes: editNotes.trim(),
-        ...(editIsQuestions ? { question: editQuestion.trim(), answer: editAnswer.trim() } : {}),
+        ...(editIsQuestions ? { question: editQuestion.trim(), answer: editAnswer.trim(), media: finalMedia } : {}),
       });
       setEditing(false);
     } finally {
@@ -699,6 +805,31 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
                   <span style={S.fieldLabel}>Answer</span>
                   <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editAnswer} onChange={(e) => setEditAnswer(e.target.value)} />
                 </label>
+                {editExistingMedia.length > 0 && (
+                  <div style={S.mediaFileList}>
+                    {editExistingMedia.map((m, i) => (
+                      <div key={i} style={S.mediaFileRow}>
+                        <span>{m.type === "video" ? "Video" : "Image"} {i + 1}</span>
+                        <button type="button" style={S.discussBtn} onClick={() => setEditExistingMedia((prev) => prev.filter((_, idx) => idx !== i))}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {editNewMediaFiles.length > 0 && (
+                  <div style={S.mediaFileList}>
+                    {editNewMediaFiles.map((f, i) => (
+                      <div key={i} style={S.mediaFileRow}>
+                        <span>{f.name}</span>
+                        <button type="button" style={S.discussBtn} onClick={() => setEditNewMediaFiles((prev) => prev.filter((_, idx) => idx !== i))}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ ...S.dropzone, marginBottom: 13 }} onClick={() => editMediaRef.current?.click()}>
+                  <Upload size={18} color="#5A6B78" />
+                  <span>Add more images or videos</span>
+                  <input ref={editMediaRef} type="file" accept="image/*,video/*" multiple style={{ display: "none" }} onChange={onEditMediaFilesChange} />
+                </div>
               </>
             ) : (
               <label style={S.field}>
@@ -717,9 +848,13 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
           <>
             <div style={S.qaLabel}>Question</div>
             <p style={S.detailNotes}>{item.question}</p>
-            {item.fileUrl && (
+            {media.length > 0 && (
               <div style={S.detailMedia}>
-                <img src={item.fileUrl} alt={item.title} style={S.detailImg} />
+                {media.map((m, i) => (
+                  m.type === "video"
+                    ? <video key={i} src={m.url} controls style={{ ...S.detailImg, marginBottom: i < media.length - 1 ? 10 : 0 }} />
+                    : <img key={i} src={m.url} alt={item.title} style={{ ...S.detailImg, marginBottom: i < media.length - 1 ? 10 : 0 }} />
+                ))}
               </div>
             )}
             <div style={S.qaLabel}>Answer</div>
@@ -975,7 +1110,9 @@ const S = {
 
   rowCard: { background: "#fff", borderRadius: 11, border: "1px solid #EAEDEB", padding: 10, display: "flex", gap: 11 },
   rowThumb: { width: 52, height: 52, borderRadius: 9, flexShrink: 0, display: "grid", placeItems: "center", border: "none", cursor: "pointer" },
-  rowEkg: { width: 52, height: 52, borderRadius: 9, flexShrink: 0, background: "#FBF3F0", overflow: "hidden", display: "grid", placeItems: "center" },
+  rowEkg: { width: 52, height: 52, borderRadius: 9, flexShrink: 0, background: "#FBF3F0", overflow: "hidden", display: "grid", placeItems: "center", position: "relative" },
+  mediaBadge: { position: "absolute", bottom: 2, right: 2, background: "rgba(18,35,44,.8)", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 5, padding: "1px 4px", lineHeight: 1.4 },
+  mediaBadgeCard: { position: "absolute", bottom: 8, right: 8, background: "rgba(18,35,44,.75)", color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "2px 7px" },
   thumbImg: { width: "100%", height: "100%", objectFit: "cover" },
   playMini: { width: 30, height: 30, borderRadius: 999, display: "grid", placeItems: "center" },
   rowMain: { minWidth: 0, flex: 1 },
@@ -1021,6 +1158,8 @@ const S = {
   sourceToggle: { display: "flex", gap: 6, marginBottom: 10 },
   sourceToggleBtn: { flex: 1, border: "1px solid #DDE3E1", background: "#fff", color: "#5A6B78", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontWeight: 600, cursor: "pointer" },
   sourceToggleBtnActive: { background: "#12232C", color: "#fff", borderColor: "#12232C" },
+  mediaFileList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 8 },
+  mediaFileRow: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "#3A4A54", background: "#F0F3F1", borderRadius: 7, padding: "6px 10px" },
   signInDivider: { textAlign: "center", color: "#93A1AC", fontSize: 12, margin: "14px 0" },
   adminRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F0F3F1", fontSize: 13.5, color: "#12232C" },
   errorText: { color: "#B4573A", fontSize: 12.5, marginTop: 6 },
