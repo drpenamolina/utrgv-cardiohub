@@ -96,11 +96,24 @@ export default function SalinasCardio({ user }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
+  const searchRef = useRef(null);
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
   const openUpload = (category) => {
     if (!user) { setSignInPromptOpen(true); return; }
     setUpload({ category });
   };
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!user?.email) { setIsAdmin(false); return; }
@@ -206,7 +219,7 @@ export default function SalinasCardio({ user }) {
       <header style={S.header}>
         <div style={S.headerInner}>
           <div style={S.brandRow}>
-            <Logo size={40} />
+            <Logo size={32} />
             <div>
               <div style={S.kicker}>Cardiology teaching library</div>
               <h1 style={S.title}>UTRGV CardioHub</h1>
@@ -239,8 +252,16 @@ export default function SalinasCardio({ user }) {
         <div style={S.controls}>
           <div style={S.searchWrap}>
             <Search size={18} color="#7B8794" />
-            <input style={S.search} placeholder="Search titles, pathologies, notes..." value={query} onChange={(e) => setQuery(e.target.value)} />
-            {query && <button style={S.clearBtn} onClick={() => setQuery("")}><X size={15} /></button>}
+            <input
+              ref={searchRef}
+              style={S.search}
+              placeholder="Search titles, pathologies, notes..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query
+              ? <button style={S.clearBtn} onClick={() => setQuery("")}><X size={15} /></button>
+              : <span style={S.kbdHint}>{isMac ? "⌘" : "Ctrl"}K</span>}
           </div>
           <div style={S.viewToggle}>
             <button style={{ ...S.viewBtn, ...(view === "board" ? S.viewBtnActive : {}) }} onClick={() => setView("board")}>
@@ -275,7 +296,7 @@ export default function SalinasCardio({ user }) {
             const laneItems = byLane(lane.id);
             const Icon = lane.icon;
             return (
-              <section key={lane.id} style={S.column}>
+              <section key={lane.id} className="uc-column" style={S.column}>
                 <div style={{ ...S.colHead, borderTopColor: lane.accent }}>
                   <div style={S.colHeadTop}>
                     <div style={S.colTitleWrap}>
@@ -349,7 +370,7 @@ function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
   const media = item.category === "questions" ? getMedia(item) : [];
   const [showVideo, setShowVideo] = useState(false);
   return (
-    <article style={S.rowCard}>
+    <article className="uc-row-card" style={S.rowCard}>
       {item.category === "ekg" ? (
         item.fileUrl
           ? <div style={S.rowEkg}><img src={item.fileUrl} alt={item.title} style={S.thumbImg} /></div>
@@ -427,7 +448,7 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
   const media = item.category === "questions" ? getMedia(item) : [];
   const [showVideo, setShowVideo] = useState(false);
   return (
-    <article style={S.card}>
+    <article className="uc-card" style={S.card}>
       <div style={{ ...S.cardTop, background: `${cat.accent}0F`, ...(item.fileType === "youtube" && playing && showVideo ? S.cardTopExpanded : {}) }}>
         {item.category === "ekg"
           ? (item.fileUrl ? <img src={item.fileUrl} alt={item.title} style={S.cardImg} /> : <EkgPreview color={cat.accent} />)
@@ -1217,12 +1238,12 @@ function timeAgo(ts) {
 }
 
 const S = {
-  app: { minHeight: "100vh", background: "#F5F6F4", color: "#12232C", fontFamily: "'Inter', system-ui, sans-serif", paddingBottom: 60 },
-  header: { background: "#12232C", padding: "22px 20px 18px", position: "sticky", top: 0, zIndex: 20 },
+  app: { minHeight: "100vh", background: "var(--uc-bg)", color: "#12232C", fontFamily: "'Inter', system-ui, sans-serif", paddingBottom: 60 },
+  header: { background: "#12232C", padding: "14px 20px", position: "sticky", top: 0, zIndex: 20 },
   headerInner: { maxWidth: 1240, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" },
   brandRow: { display: "flex", alignItems: "center", gap: 12 },
   kicker: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#5F9AB0", fontWeight: 600 },
-  title: { fontFamily: "'Fraunces', Georgia, serif", fontSize: 34, fontWeight: 600, color: "#fff", margin: "2px 0 0", letterSpacing: "-0.01em" },
+  title: { fontFamily: "'Fraunces', Georgia, serif", fontSize: 26, fontWeight: 600, color: "#fff", margin: "1px 0 0", letterSpacing: "-0.01em" },
   headerActions: { display: "flex", gap: 10, alignItems: "center" },
   waBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "transparent", border: "1px solid #2E4A57", color: "#CFE0E7", padding: "9px 14px", borderRadius: 9, fontSize: 14, fontWeight: 500, cursor: "pointer", textDecoration: "none" },
   uploadBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "#5F9AB0", border: "none", color: "#062028", padding: "9px 15px", borderRadius: 9, fontSize: 14, fontWeight: 600, cursor: "pointer" },
@@ -1232,6 +1253,7 @@ const S = {
   searchWrap: { flex: 1, minWidth: 220, background: "#fff", borderRadius: 11, padding: "0 14px", display: "flex", alignItems: "center", gap: 10, height: 46 },
   search: { flex: 1, border: "none", outline: "none", fontSize: 15, background: "transparent", color: "#12232C" },
   clearBtn: { border: "none", background: "#EEF1F0", borderRadius: 6, width: 24, height: 24, display: "grid", placeItems: "center", cursor: "pointer", color: "#5A6B78" },
+  kbdHint: { fontSize: 11, fontWeight: 600, color: "#98A2B3", background: "#F2F4F7", border: "1px solid var(--uc-border)", borderRadius: "var(--uc-radius-sm)", padding: "2px 6px", flexShrink: 0 },
   viewToggle: { display: "flex", background: "#0B1A22", borderRadius: 10, padding: 3, gap: 2 },
   viewBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: "#7E97A3", padding: "8px 14px", borderRadius: 8, fontSize: 13.5, fontWeight: 500, cursor: "pointer" },
   viewBtnActive: { background: "#5F9AB0", color: "#062028", fontWeight: 600 },
@@ -1242,7 +1264,7 @@ const S = {
   tagMoreBtn: { fontSize: 12, padding: "5px 11px", borderRadius: 999, border: "1px dashed #C8D2CE", background: "transparent", color: "#5A6B78", cursor: "pointer", fontWeight: 600 },
 
   board: { maxWidth: 1240, margin: "20px auto 0", padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16, alignItems: "start" },
-  column: { background: "#EFF1EF", borderRadius: 14, overflow: "hidden", border: "1px solid #E4E8E5" },
+  column: { background: "#EFF1EF", overflow: "hidden" },
   colHead: { background: "#fff", borderTop: "3px solid", padding: "14px 15px 12px" },
   colHeadTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" },
   colTitleWrap: { display: "flex", gap: 10, alignItems: "center" },
@@ -1254,7 +1276,7 @@ const S = {
   colBody: { padding: 10, display: "flex", flexDirection: "column", gap: 10, maxHeight: 620, overflowY: "auto" },
   colEmpty: { textAlign: "center", color: "#93A1AC", fontSize: 13, padding: "24px 0" },
 
-  rowCard: { background: "#fff", borderRadius: 11, border: "1px solid #EAEDEB", padding: 10, display: "flex", gap: 11 },
+  rowCard: { background: "#fff", padding: 10, display: "flex", gap: 11 },
   rowThumb: { width: 52, height: 52, borderRadius: 9, flexShrink: 0, display: "grid", placeItems: "center", border: "none", cursor: "pointer" },
   rowEkg: { width: 52, height: 52, borderRadius: 9, flexShrink: 0, background: "#FBF3F0", overflow: "hidden", display: "grid", placeItems: "center", position: "relative" },
   mediaBadge: { position: "absolute", bottom: 2, right: 2, background: "rgba(18,35,44,.8)", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 5, padding: "1px 4px", lineHeight: 1.4 },
@@ -1263,7 +1285,7 @@ const S = {
   playMini: { width: 30, height: 30, borderRadius: 999, display: "grid", placeItems: "center" },
   rowMain: { minWidth: 0, flex: 1 },
   rowTitle: { fontSize: 14, fontWeight: 600, margin: 0, lineHeight: 1.3, color: "#12232C" },
-  rowNotes: { fontSize: 12, color: "#6B7A85", margin: "4px 0 0", lineHeight: 1.4 },
+  rowNotes: { fontSize: 12, color: "var(--uc-text-meta)", margin: "4px 0 0", lineHeight: 1.4 },
   rowTags: { display: "flex", gap: 5, flexWrap: "wrap", margin: "8px 0 0" },
   rowMeta: { fontSize: 11, color: "#93A1AC", marginTop: 8, display: "flex", alignItems: "center", gap: 4 },
   discussBtn: { display: "inline-flex", alignItems: "center", gap: 3, border: "none", background: "none", color: "#8A5A9E", fontSize: 11, fontWeight: 600, cursor: "pointer", marginLeft: "auto", padding: 0 },
@@ -1277,19 +1299,19 @@ const S = {
 
   grid: { maxWidth: 1240, margin: "22px auto 0", padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 18 },
   gridEmpty: { gridColumn: "1/-1", textAlign: "center", padding: "60px 20px", color: "#7B8794", fontSize: 15 },
-  card: { background: "#fff", borderRadius: 14, overflow: "hidden", border: "1px solid #EAEDEB", display: "flex", flexDirection: "column" },
+  card: { background: "#fff", overflow: "hidden", display: "flex", flexDirection: "column" },
   cardTop: { position: "relative", height: 92, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", transition: "height 0.15s ease" },
   cardTopExpanded: { height: 190 },
   cardImg: { width: "100%", height: "100%", objectFit: "cover" },
   ytThumbBtn: { position: "relative", width: "100%", height: "100%", border: "none", padding: 0, cursor: "pointer", background: "none" },
   playCircleOverlay: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: 44, height: 44, borderRadius: 999, display: "grid", placeItems: "center", boxShadow: "0 2px 8px rgba(0,0,0,.25)" },
-  catTag: { position: "absolute", top: 10, right: 10, fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", background: "#fff", border: "1px solid", borderRadius: 6, padding: "3px 7px" },
+  catTag: { position: "absolute", top: 10, right: 10, fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", background: "#fff", border: "1px solid", borderRadius: "var(--uc-radius-sm)", padding: "3px 7px" },
   docPreview: { display: "grid", placeItems: "center", width: "100%", height: "100%" },
   audioBtn: { display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", cursor: "pointer", width: "100%", height: "100%" },
   playCircle: { width: 44, height: 44, borderRadius: 999, display: "grid", placeItems: "center", boxShadow: "0 2px 8px rgba(0,0,0,.15)" },
   cardBody: { padding: "13px 15px 15px" },
   cardTitle: { fontSize: 15.5, fontWeight: 600, margin: 0, lineHeight: 1.3 },
-  cardNotes: { fontSize: 13, color: "#5A6B78", margin: "6px 0 0", lineHeight: 1.45 },
+  cardNotes: { fontSize: 13, color: "var(--uc-text-meta)", margin: "6px 0 0", lineHeight: 1.45 },
   cardTags: { display: "flex", gap: 6, flexWrap: "wrap", margin: "11px 0 0" },
   cardMeta: { display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#93A1AC", marginTop: 12 },
   discussBtnCard: { display: "inline-flex", alignItems: "center", gap: 3, border: "none", background: "none", color: "#8A5A9E", fontSize: 11.5, fontWeight: 600, cursor: "pointer", marginLeft: "auto", padding: 0 },
@@ -1342,6 +1364,17 @@ const S = {
 
 const GLOBAL_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap');
+:root {
+  --uc-bg: #F8FAFB;
+  --uc-surface: #FFFFFF;
+  --uc-border: #E2E8F0;
+  --uc-border-hover: #CBD5E1;
+  --uc-radius: 8px;
+  --uc-radius-sm: 6px;
+  --uc-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --uc-shadow-hover: 0 4px 12px rgba(16, 24, 40, 0.08);
+  --uc-text-meta: #667085;
+}
 * { box-sizing: border-box; }
 body { margin: 0; }
 .wf-bar { width: 3px; border-radius: 2px; animation: wf 0.7s ease-in-out infinite alternate; }
@@ -1349,6 +1382,18 @@ body { margin: 0; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #5F9AB0; outline-offset: 2px; }
 .colBody::-webkit-scrollbar { width: 6px; }
 .colBody::-webkit-scrollbar-thumb { background: #D4DAD6; border-radius: 3px; }
+.uc-card, .uc-row-card {
+  border-radius: var(--uc-radius);
+  border: 1px solid var(--uc-border);
+  box-shadow: var(--uc-shadow);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.uc-card:hover, .uc-row-card:hover {
+  box-shadow: var(--uc-shadow-hover);
+  border-color: var(--uc-border-hover);
+  transform: translateY(-1px);
+}
+.uc-column { border-radius: var(--uc-radius); border: 1px solid var(--uc-border); }
 @media (max-width: 900px) {
   .wf-bar { display: none; }
   .board { grid-template-columns: 1fr !important; }
