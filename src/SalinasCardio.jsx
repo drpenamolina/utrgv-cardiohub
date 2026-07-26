@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   FileText, HeartPulse, Activity, Stethoscope, Syringe,
   Search, Upload, X, Play, Pause, Tag, User, Plus, MessageCircle,
-  Columns, LayoutGrid, LogOut, ShieldCheck, Pencil, Trash2, HelpCircle
+  Columns, LayoutGrid, LogOut, ShieldCheck, Pencil, Trash2, HelpCircle, Pin, PinOff
 } from "lucide-react";
 import {
   collection, addDoc, onSnapshot, orderBy, query as fsQuery, serverTimestamp,
@@ -54,6 +54,7 @@ function getMedia(item) {
 
 const WHATSAPP_LINK = "https://chat.whatsapp.com/your-group-invite";
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB
+const TAG_LIMIT = 10;
 
 export default function SalinasCardio({ user }) {
   const [items, setItems] = useState([]);
@@ -66,6 +67,7 @@ export default function SalinasCardio({ user }) {
   const [signInPromptOpen, setSignInPromptOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [tagsExpanded, setTagsExpanded] = useState(false);
 
   const openUpload = (category) => {
     if (!user) { setSignInPromptOpen(true); return; }
@@ -110,7 +112,10 @@ export default function SalinasCardio({ user }) {
   };
 
   const filtered = useMemo(
-    () => items.filter(match).sort((a, b) => b.createdAt - a.createdAt),
+    () => items.filter(match).sort((a, b) => {
+      if (!!b.pinned !== !!a.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+      return b.createdAt - a.createdAt;
+    }),
     [items, query, activeTag]
   );
 
@@ -220,10 +225,15 @@ export default function SalinasCardio({ user }) {
       {allTags.length > 0 && (
         <div style={S.tagRow}>
           <Tag size={14} color="#7B8794" />
-          {allTags.map((t) => (
+          {(tagsExpanded ? allTags : allTags.slice(0, TAG_LIMIT)).map((t) => (
             <button key={t} onClick={() => setActiveTag(activeTag === t ? null : t)}
               style={{ ...S.tagPill, ...(activeTag === t ? S.tagPillActive : {}) }}>{t}</button>
           ))}
+          {allTags.length > TAG_LIMIT && (
+            <button style={S.tagMoreBtn} onClick={() => setTagsExpanded((v) => !v)}>
+              {tagsExpanded ? "Show less" : `+${allTags.length - TAG_LIMIT} more`}
+            </button>
+          )}
           {activeTag && <button style={S.tagClear} onClick={() => setActiveTag(null)}>clear x</button>}
         </div>
       )}
@@ -344,7 +354,10 @@ function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
         </a>
       )}
       <div style={S.rowMain}>
-        <h3 style={{ ...S.rowTitle, cursor: "pointer" }} onClick={onOpen}>{item.title}</h3>
+        <h3 style={{ ...S.rowTitle, cursor: "pointer" }} onClick={onOpen}>
+          {item.pinned && <Pin size={12} color="#C08A2E" style={{ verticalAlign: -1, marginRight: 4 }} />}
+          {item.title}
+        </h3>
         {item.category === "questions"
           ? (item.question && <p style={S.rowNotes}>{item.question}</p>)
           : (item.notes && <p style={S.rowNotes}>{item.notes}</p>)}
@@ -421,7 +434,10 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
         <span style={{ ...S.catTag, color: cat.accent, borderColor: `${cat.accent}44` }}>{cat.label}</span>
       </div>
       <div style={S.cardBody}>
-        <h3 style={{ ...S.cardTitle, cursor: "pointer" }} onClick={onOpen}>{item.title}</h3>
+        <h3 style={{ ...S.cardTitle, cursor: "pointer" }} onClick={onOpen}>
+          {item.pinned && <Pin size={12} color="#C08A2E" style={{ verticalAlign: -1, marginRight: 4 }} />}
+          {item.title}
+        </h3>
         {item.category === "questions"
           ? (item.question && <p style={S.cardNotes}>{item.question}</p>)
           : (item.notes && <p style={S.cardNotes}>{item.notes}</p>)}
@@ -646,6 +662,7 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pinning, setPinning] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editCategory, setEditCategory] = useState("");
   const [editTags, setEditTags] = useState("");
@@ -762,6 +779,16 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
     }
   };
 
+  const togglePin = async () => {
+    if (pinning) return;
+    setPinning(true);
+    try {
+      await updateDoc(doc(db, "items", item.id), { pinned: !item.pinned });
+    } finally {
+      setPinning(false);
+    }
+  };
+
   return (
     <div style={S.overlay} onClick={onClose}>
       <div style={S.detailModal} onClick={(e) => e.stopPropagation()}>
@@ -779,6 +806,9 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
           <span style={S.rowMeta}><User size={12} color="#93A1AC" /> {item.uploaderName} · {timeAgo(item.createdAt)}</span>
           {isAdmin && !editing && (
             <div style={S.adminActions}>
+              <button style={S.discussBtn} onClick={togglePin} disabled={pinning}>
+                {item.pinned ? <PinOff size={12} /> : <Pin size={12} />} {item.pinned ? "Unpin" : "Pin"}
+              </button>
               <button style={S.discussBtn} onClick={startEdit}><Pencil size={12} /> Edit</button>
               <button style={{ ...S.discussBtn, color: "#B4573A" }} onClick={() => setConfirmingDelete(true)}><Trash2 size={12} /> Delete</button>
             </div>
@@ -1106,6 +1136,7 @@ const S = {
   tagPill: { fontSize: 12, padding: "5px 11px", borderRadius: 999, border: "1px solid #DDE3E1", background: "#fff", color: "#5A6B78", cursor: "pointer", fontWeight: 500 },
   tagPillActive: { background: "#12232C", color: "#fff", borderColor: "#12232C" },
   tagClear: { fontSize: 12, background: "none", border: "none", color: "#93A1AC", cursor: "pointer" },
+  tagMoreBtn: { fontSize: 12, padding: "5px 11px", borderRadius: 999, border: "1px dashed #C8D2CE", background: "transparent", color: "#5A6B78", cursor: "pointer", fontWeight: 600 },
 
   board: { maxWidth: 1240, margin: "20px auto 0", padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16, alignItems: "start" },
   column: { background: "#EFF1EF", borderRadius: 14, overflow: "hidden", border: "1px solid #E4E8E5" },
