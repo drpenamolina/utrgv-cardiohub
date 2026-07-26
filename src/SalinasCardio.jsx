@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   FileText, HeartPulse, Activity, Stethoscope, Syringe,
   Search, Upload, X, Play, Pause, Tag, User, Plus, MessageCircle,
-  Columns, LayoutGrid, LogOut, ShieldCheck, Pencil, Trash2
+  Columns, LayoutGrid, LogOut, ShieldCheck, Pencil, Trash2, HelpCircle
 } from "lucide-react";
 import {
   collection, addDoc, onSnapshot, orderBy, query as fsQuery, serverTimestamp,
@@ -28,12 +28,14 @@ const CATEGORIES = [
   { id: "procedures", label: "Procedures",     icon: Syringe,     accent: "#C08A2E", lane: "docs" },
   { id: "ekg",        label: "EKG Library",    icon: Activity,    accent: "#B4573A", lane: "ekg" },
   { id: "murmurs",    label: "Murmur Library", icon: HeartPulse,  accent: "#8A5A9E", lane: "murmurs" },
+  { id: "questions",  label: "Q&A",            icon: HelpCircle,  accent: "#1F6F78", lane: "qanda" },
 ];
 
 const LANES = [
-  { id: "docs",    label: "Documents",    sub: "Articles · Guidelines · Procedures", icon: FileText,   accent: "#3B82A0", defaultCat: "articles" },
-  { id: "ekg",     label: "EKGs",         sub: "Tracings by pathology",               icon: Activity,   accent: "#B4573A", defaultCat: "ekg" },
-  { id: "murmurs", label: "Heart Sounds", sub: "Murmur audio library",                icon: HeartPulse, accent: "#8A5A9E", defaultCat: "murmurs" },
+  { id: "docs",    label: "Documents",       sub: "Articles · Guidelines · Procedures",  icon: FileText,   accent: "#3B82A0", defaultCat: "articles" },
+  { id: "ekg",     label: "EKGs",            sub: "Tracings by pathology",               icon: Activity,   accent: "#B4573A", defaultCat: "ekg" },
+  { id: "murmurs", label: "Heart Sounds",    sub: "Murmur audio library",                icon: HeartPulse, accent: "#8A5A9E", defaultCat: "murmurs" },
+  { id: "qanda",   label: "Case Questions",  sub: "Questions & answers from providers",  icon: HelpCircle, accent: "#1F6F78", defaultCat: "questions" },
 ];
 
 const catById   = (id) => CATEGORIES.find((c) => c.id === id);
@@ -95,7 +97,10 @@ export default function SalinasCardio({ user }) {
     if (activeTag && !i.tags.includes(activeTag)) return false;
     if (!query.trim()) return true;
     const q = query.toLowerCase();
-    return i.title.toLowerCase().includes(q) || i.tags.some((t) => t.toLowerCase().includes(q)) || (i.notes || "").toLowerCase().includes(q);
+    return i.title.toLowerCase().includes(q) || i.tags.some((t) => t.toLowerCase().includes(q))
+      || (i.notes || "").toLowerCase().includes(q)
+      || (i.question || "").toLowerCase().includes(q)
+      || (i.answer || "").toLowerCase().includes(q);
   };
 
   const filtered = useMemo(
@@ -292,6 +297,10 @@ function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
             {playing ? <Pause size={15} color="#fff" /> : <Play size={15} color="#fff" style={{ marginLeft: 1 }} />}
           </span>
         </button>
+      ) : item.category === "questions" ? (
+        item.fileUrl
+          ? <div style={S.rowEkg}><img src={item.fileUrl} alt={item.title} style={S.thumbImg} /></div>
+          : <div style={{ ...S.rowThumb, background: `${cat.accent}14` }}><Icon size={20} color={cat.accent} strokeWidth={1.6} /></div>
       ) : (
         <a href={item.fileUrl} target="_blank" rel="noreferrer" style={{ ...S.rowThumb, background: `${cat.accent}14` }}>
           <Icon size={20} color={cat.accent} strokeWidth={1.6} />
@@ -299,7 +308,9 @@ function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
       )}
       <div style={S.rowMain}>
         <h3 style={{ ...S.rowTitle, cursor: "pointer" }} onClick={onOpen}>{item.title}</h3>
-        {item.notes && <p style={S.rowNotes}>{item.notes}</p>}
+        {item.category === "questions"
+          ? (item.question && <p style={S.rowNotes}>{item.question}</p>)
+          : (item.notes && <p style={S.rowNotes}>{item.notes}</p>)}
         <div style={S.rowTags}>
           {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => onTag(t)}>{t}</button>)}
         </div>
@@ -353,6 +364,10 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
               </span>
               {playing && <Waveform color={cat.accent} />}
             </button>
+          ) : item.category === "questions" ? (
+            item.fileUrl
+              ? <img src={item.fileUrl} alt={item.title} style={S.cardImg} />
+              : <div style={S.docPreview}><Icon size={34} color={cat.accent} strokeWidth={1.5} /></div>
           ) : (
             <a href={item.fileUrl} target="_blank" rel="noreferrer" style={S.docPreview}>
               <Icon size={34} color={cat.accent} strokeWidth={1.5} />
@@ -362,7 +377,9 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
       </div>
       <div style={S.cardBody}>
         <h3 style={{ ...S.cardTitle, cursor: "pointer" }} onClick={onOpen}>{item.title}</h3>
-        {item.notes && <p style={S.cardNotes}>{item.notes}</p>}
+        {item.category === "questions"
+          ? (item.question && <p style={S.cardNotes}>{item.question}</p>)
+          : (item.notes && <p style={S.cardNotes}>{item.notes}</p>)}
         <div style={S.cardTags}>{item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => onTag(t)}>{t}</button>)}</div>
         <div style={S.cardMeta}>
           <User size={12} color="#93A1AC" /> {item.uploaderName}<span style={S.metaDot}>·</span>{timeAgo(item.createdAt)}
@@ -397,6 +414,8 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
   const [category, setCategory] = useState(initialCategory || "articles");
   const [tags, setTags] = useState("");
   const [notes, setNotes] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
   const [uploader, setUploader] = useState("");
   const [file, setFile] = useState(null);
   const [fileError, setFileError] = useState("");
@@ -406,6 +425,7 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
   const fileRef = useRef();
 
   const isYoutube = category === "murmurs" && sourceMode === "youtube";
+  const isQuestions = category === "questions";
 
   const onFileChange = (e) => {
     const f = e.target.files?.[0];
@@ -426,7 +446,15 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
       setFileError("Enter a valid YouTube link.");
       return;
     }
-    const fileType = isYoutube ? "youtube" : category === "murmurs" ? "audio" : category === "ekg" ? "image" : "pdf";
+    if (isQuestions && (!question.trim() || !answer.trim())) {
+      setFileError("Enter both a question and an answer.");
+      return;
+    }
+    const fileType = isYoutube ? "youtube"
+      : category === "murmurs" ? "audio"
+      : category === "ekg" ? "image"
+      : isQuestions ? (file ? "image" : "")
+      : "pdf";
     setProgress(0);
     try {
       await onAdd(
@@ -436,6 +464,7 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
           title: title.trim(), category,
           tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
           notes: notes.trim(), uploaderName: uploader.trim(), fileType,
+          ...(isQuestions ? { question: question.trim(), answer: answer.trim() } : {}),
         },
         setProgress
       );
@@ -469,10 +498,23 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
           <span style={S.fieldLabel}>Pathology tags <span style={S.hint}>comma-separated</span></span>
           <input style={S.input} value={tags} onChange={(e) => setTags(e.target.value)} placeholder="STEMI, ischemia, inferior" disabled={busy} />
         </label>
-        <label style={S.field}>
-          <span style={S.fieldLabel}>Teaching note <span style={S.hint}>optional</span></span>
-          <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What should the intern notice?" disabled={busy} />
-        </label>
+        {isQuestions ? (
+          <>
+            <label style={S.field}>
+              <span style={S.fieldLabel}>Question</span>
+              <textarea style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="What the provider asked..." disabled={busy} />
+            </label>
+            <label style={S.field}>
+              <span style={S.fieldLabel}>Answer</span>
+              <textarea style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="The correct answer / explanation" disabled={busy} />
+            </label>
+          </>
+        ) : (
+          <label style={S.field}>
+            <span style={S.fieldLabel}>Teaching note <span style={S.hint}>optional</span></span>
+            <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What should the intern notice?" disabled={busy} />
+          </label>
+        )}
         <label style={S.field}>
           <span style={S.fieldLabel}>Your name</span>
           <input style={S.input} value={uploader} onChange={(e) => setUploader(e.target.value)} placeholder="Dr. Salinas / intern name" disabled={busy} />
@@ -491,7 +533,7 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
         ) : (
           <div style={{ ...S.dropzone, opacity: busy ? 0.6 : 1 }} onClick={() => !busy && fileRef.current?.click()}>
             <Upload size={18} color="#5A6B78" />
-            <span>{file?.name || "Choose file (PDF, image, or audio)"}</span>
+            <span>{file?.name || (isQuestions ? "Attach an image to the question (optional)" : "Choose file (PDF, image, or audio)")}</span>
             <input ref={fileRef} type="file" style={{ display: "none" }} onChange={onFileChange} disabled={busy} />
           </div>
         )}
@@ -501,7 +543,7 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
             <div style={{ ...S.progressFill, width: `${Math.round(progress * 100)}%` }} />
           </div>
         )}
-        <button style={{ ...S.uploadBtn, width: "100%", justifyContent: "center", marginTop: 8, opacity: title.trim() && uploader.trim() && !busy ? 1 : 0.5 }} onClick={submit} disabled={busy}>
+        <button style={{ ...S.uploadBtn, width: "100%", justifyContent: "center", marginTop: 8, opacity: title.trim() && uploader.trim() && (!isQuestions || (question.trim() && answer.trim())) && !busy ? 1 : 0.5 }} onClick={submit} disabled={busy}>
           {busy ? `Uploading… ${Math.round(progress * 100)}%` : "Add to library"}
         </button>
       </div>
@@ -520,6 +562,8 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
   const [editCategory, setEditCategory] = useState("");
   const [editTags, setEditTags] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [editQuestion, setEditQuestion] = useState("");
+  const [editAnswer, setEditAnswer] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -563,11 +607,14 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
     setEditCategory(item.category);
     setEditTags(item.tags.join(", "));
     setEditNotes(item.notes || "");
+    setEditQuestion(item.question || "");
+    setEditAnswer(item.answer || "");
     setEditing(true);
   };
 
   const saveEdit = async () => {
     if (!editTitle.trim() || saving) return;
+    const editIsQuestions = editCategory === "questions";
     setSaving(true);
     try {
       await updateDoc(doc(db, "items", item.id), {
@@ -575,6 +622,7 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
         category: editCategory,
         tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
         notes: editNotes.trim(),
+        ...(editIsQuestions ? { question: editQuestion.trim(), answer: editAnswer.trim() } : {}),
       });
       setEditing(false);
     } finally {
@@ -641,15 +689,43 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
               <span style={S.fieldLabel}>Pathology tags <span style={S.hint}>comma-separated</span></span>
               <input style={S.input} value={editTags} onChange={(e) => setEditTags(e.target.value)} />
             </label>
-            <label style={S.field}>
-              <span style={S.fieldLabel}>Teaching note</span>
-              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
-            </label>
+            {editCategory === "questions" ? (
+              <>
+                <label style={S.field}>
+                  <span style={S.fieldLabel}>Question</span>
+                  <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editQuestion} onChange={(e) => setEditQuestion(e.target.value)} />
+                </label>
+                <label style={S.field}>
+                  <span style={S.fieldLabel}>Answer</span>
+                  <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editAnswer} onChange={(e) => setEditAnswer(e.target.value)} />
+                </label>
+              </>
+            ) : (
+              <label style={S.field}>
+                <span style={S.fieldLabel}>Teaching note</span>
+                <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+              </label>
+            )}
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <button style={{ ...S.uploadBtn, flex: 1, justifyContent: "center" }} onClick={saveEdit} disabled={saving || !editTitle.trim()}>
                 {saving ? "Saving…" : "Save changes"}
               </button>
               <button style={{ ...S.sourceToggleBtn, flex: 1 }} onClick={() => setEditing(false)}>Cancel</button>
+            </div>
+          </>
+        ) : item.category === "questions" ? (
+          <>
+            <div style={S.qaLabel}>Question</div>
+            <p style={S.detailNotes}>{item.question}</p>
+            {item.fileUrl && (
+              <div style={S.detailMedia}>
+                <img src={item.fileUrl} alt={item.title} style={S.detailImg} />
+              </div>
+            )}
+            <div style={S.qaLabel}>Answer</div>
+            <p style={S.detailNotes}>{item.answer}</p>
+            <div style={S.rowTags}>
+              {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => { onTag(t); onClose(); }}>{t}</button>)}
             </div>
           </>
         ) : (
@@ -884,7 +960,7 @@ const S = {
   tagPillActive: { background: "#12232C", color: "#fff", borderColor: "#12232C" },
   tagClear: { fontSize: 12, background: "none", border: "none", color: "#93A1AC", cursor: "pointer" },
 
-  board: { maxWidth: 1240, margin: "20px auto 0", padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, alignItems: "start" },
+  board: { maxWidth: 1240, margin: "20px auto 0", padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16, alignItems: "start" },
   column: { background: "#EFF1EF", borderRadius: 14, overflow: "hidden", border: "1px solid #E4E8E5" },
   colHead: { background: "#fff", borderTop: "3px solid", padding: "14px 15px 12px" },
   colHeadTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" },
@@ -960,6 +1036,7 @@ const S = {
   detailYtIframe: { width: "100%", height: 280, border: "none", borderRadius: 10 },
   detailPdfLink: { display: "inline-flex", alignItems: "center", gap: 8, background: "#F0F3F1", color: "#12232C", borderRadius: 9, padding: "10px 14px", fontSize: 14, fontWeight: 600, textDecoration: "none" },
   detailNotes: { fontSize: 14, color: "#3A4A54", lineHeight: 1.5, margin: "0 0 10px" },
+  qaLabel: { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#1F6F78", margin: "0 0 4px" },
 
   commentsSection: { marginTop: 20, paddingTop: 16, borderTop: "1px solid #EAEDEB" },
   commentsHeading: { fontSize: 14, fontWeight: 700, margin: "0 0 10px", color: "#12232C" },
