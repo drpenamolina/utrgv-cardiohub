@@ -2,10 +2,13 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   FileText, HeartPulse, Activity, Stethoscope, Syringe,
   Search, Upload, X, Play, Pause, Tag, User, Plus, MessageCircle,
-  Columns, LayoutGrid, LogOut
+  Columns, LayoutGrid, LogOut, ShieldCheck, Pencil, Trash2
 } from "lucide-react";
-import { collection, addDoc, onSnapshot, orderBy, query as fsQuery, serverTimestamp } from "firebase/firestore";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import {
+  collection, addDoc, onSnapshot, orderBy, query as fsQuery, serverTimestamp,
+  doc, updateDoc, deleteDoc, setDoc, getDocs,
+} from "firebase/firestore";
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { signOut, signInWithPopup, sendSignInLinkToEmail } from "firebase/auth";
 import { auth, db, storage, googleProvider } from "./firebase";
 
@@ -53,11 +56,19 @@ export default function SalinasCardio({ user }) {
   const [playingId, setPlayingId] = useState(null);
   const [openItemId, setOpenItemId] = useState(null);
   const [signInPromptOpen, setSignInPromptOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
 
   const openUpload = (category) => {
     if (!user) { setSignInPromptOpen(true); return; }
     setUpload({ category });
   };
+
+  useEffect(() => {
+    if (!user?.email) { setIsAdmin(false); return; }
+    const unsub = onSnapshot(doc(db, "admins", user.email.toLowerCase()), (snap) => setIsAdmin(snap.exists()));
+    return unsub;
+  }, [user]);
 
   useEffect(() => {
     const q = fsQuery(collection(db, "items"), orderBy("createdAt", "desc"));
@@ -96,9 +107,10 @@ export default function SalinasCardio({ user }) {
 
   const addItem = async ({ file, fileUrl: providedUrl, ...meta }, onProgress) => {
     let fileUrl = providedUrl || "";
+    let storagePath = "";
     if (file) {
-      const path = `${meta.category}/${Date.now()}-${file.name}`;
-      const storageRef = ref(storage, path);
+      storagePath = `${meta.category}/${Date.now()}-${file.name}`;
+      const storageRef = ref(storage, storagePath);
       const task = uploadBytesResumable(storageRef, file);
       await new Promise((resolve, reject) => {
         task.on(
@@ -114,6 +126,7 @@ export default function SalinasCardio({ user }) {
     await addDoc(collection(db, "items"), {
       ...meta,
       fileUrl,
+      storagePath,
       uploaderId: user.uid,
       createdAt: serverTimestamp(),
     });
@@ -136,6 +149,11 @@ export default function SalinasCardio({ user }) {
             <button style={S.uploadBtn} onClick={() => openUpload("articles")}>
               <Plus size={16} /> Upload
             </button>
+            {isAdmin && (
+              <button style={S.signOutBtn} onClick={() => setAdminPanelOpen(true)} aria-label="Admin" title="Manage admins">
+                <ShieldCheck size={16} />
+              </button>
+            )}
             {user ? (
               <button style={S.signOutBtn} onClick={() => signOut(auth)} aria-label="Sign out" title={`Signed in as ${user.displayName || user.email}`}>
                 <LogOut size={16} />
@@ -237,12 +255,14 @@ export default function SalinasCardio({ user }) {
         <DetailModal
           item={items.find((i) => i.id === openItemId) || null}
           user={user}
+          isAdmin={isAdmin}
           onRequestSignIn={() => setSignInPromptOpen(true)}
           onClose={() => setOpenItemId(null)}
           onTag={setActiveTag}
         />
       )}
       {signInPromptOpen && <SignInModal onClose={() => setSignInPromptOpen(false)} />}
+      {adminPanelOpen && <AdminPanel user={user} onClose={() => setAdminPanelOpen(false)} />}
     </div>
   );
 }
@@ -489,10 +509,18 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
   );
 }
 
-function DetailModal({ item, user, onRequestSignIn, onClose, onTag }) {
+function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
   const [comments, setComments] = useState([]);
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!item) return;
@@ -526,47 +554,139 @@ function DetailModal({ item, user, onRequestSignIn, onClose, onTag }) {
     }
   };
 
+  const removeComment = async (commentId) => {
+    await deleteDoc(doc(db, "items", item.id, "comments", commentId));
+  };
+
+  const startEdit = () => {
+    setEditTitle(item.title);
+    setEditCategory(item.category);
+    setEditTags(item.tags.join(", "));
+    setEditNotes(item.notes || "");
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editTitle.trim() || saving) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, "items", item.id), {
+        title: editTitle.trim(),
+        category: editCategory,
+        tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
+        notes: editNotes.trim(),
+      });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteItem = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      if (item.storagePath) {
+        try { await deleteObject(ref(storage, item.storagePath)); } catch { /* file already gone */ }
+      }
+      await deleteDoc(doc(db, "items", item.id));
+      onClose();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div style={S.overlay} onClick={onClose}>
       <div style={S.detailModal} onClick={(e) => e.stopPropagation()}>
         <div style={S.modalHead}>
-          <h2 style={S.modalTitle}>{item.title}</h2>
+          {editing ? (
+            <input style={{ ...S.input, fontSize: 18, fontWeight: 600 }} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+          ) : (
+            <h2 style={S.modalTitle}>{item.title}</h2>
+          )}
           <button style={S.closeBtn} onClick={onClose}><X size={18} /></button>
         </div>
 
         <div style={S.detailMetaRow}>
           <span style={{ ...S.catTag, position: "static", color: cat.accent, borderColor: `${cat.accent}44` }}>{cat.label}</span>
           <span style={S.rowMeta}><User size={12} color="#93A1AC" /> {item.uploaderName} · {timeAgo(item.createdAt)}</span>
-        </div>
-
-        <div style={S.detailMedia}>
-          {item.category === "ekg" && item.fileUrl && <img src={item.fileUrl} alt={item.title} style={S.detailImg} />}
-          {item.fileType === "audio" && <audio src={item.fileUrl} controls style={{ width: "100%" }} />}
-          {item.fileType === "youtube" && ytId && (
-            <iframe
-              style={S.detailYtIframe}
-              src={`https://www.youtube-nocookie.com/embed/${ytId}`}
-              title={item.title} allow="autoplay; encrypted-media" allowFullScreen
-            />
-          )}
-          {item.fileType === "pdf" && item.fileUrl && (
-            <a href={item.fileUrl} target="_blank" rel="noreferrer" style={S.detailPdfLink}>
-              <FileText size={18} /> Open document
-            </a>
+          {isAdmin && !editing && (
+            <div style={S.adminActions}>
+              <button style={S.discussBtn} onClick={startEdit}><Pencil size={12} /> Edit</button>
+              <button style={{ ...S.discussBtn, color: "#B4573A" }} onClick={() => setConfirmingDelete(true)}><Trash2 size={12} /> Delete</button>
+            </div>
           )}
         </div>
 
-        {item.notes && <p style={S.detailNotes}>{item.notes}</p>}
-        <div style={S.rowTags}>
-          {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => { onTag(t); onClose(); }}>{t}</button>)}
-        </div>
+        {confirmingDelete && (
+          <div style={S.deleteConfirm}>
+            <span>Delete this item permanently?</span>
+            <button style={{ ...S.discussBtn, color: "#B4573A", fontWeight: 700 }} onClick={deleteItem} disabled={deleting}>
+              {deleting ? "Deleting…" : "Yes, delete"}
+            </button>
+            <button style={S.discussBtn} onClick={() => setConfirmingDelete(false)}>Cancel</button>
+          </div>
+        )}
+
+        {editing ? (
+          <>
+            <label style={S.field}>
+              <span style={S.fieldLabel}>Category</span>
+              <select style={S.input} value={editCategory} onChange={(e) => setEditCategory(e.target.value)}>
+                {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </label>
+            <label style={S.field}>
+              <span style={S.fieldLabel}>Pathology tags <span style={S.hint}>comma-separated</span></span>
+              <input style={S.input} value={editTags} onChange={(e) => setEditTags(e.target.value)} />
+            </label>
+            <label style={S.field}>
+              <span style={S.fieldLabel}>Teaching note</span>
+              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+            </label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <button style={{ ...S.uploadBtn, flex: 1, justifyContent: "center" }} onClick={saveEdit} disabled={saving || !editTitle.trim()}>
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+              <button style={{ ...S.sourceToggleBtn, flex: 1 }} onClick={() => setEditing(false)}>Cancel</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={S.detailMedia}>
+              {item.category === "ekg" && item.fileUrl && <img src={item.fileUrl} alt={item.title} style={S.detailImg} />}
+              {item.fileType === "audio" && <audio src={item.fileUrl} controls style={{ width: "100%" }} />}
+              {item.fileType === "youtube" && ytId && (
+                <iframe
+                  style={S.detailYtIframe}
+                  src={`https://www.youtube-nocookie.com/embed/${ytId}`}
+                  title={item.title} allow="autoplay; encrypted-media" allowFullScreen
+                />
+              )}
+              {item.fileType === "pdf" && item.fileUrl && (
+                <a href={item.fileUrl} target="_blank" rel="noreferrer" style={S.detailPdfLink}>
+                  <FileText size={18} /> Open document
+                </a>
+              )}
+            </div>
+
+            {item.notes && <p style={S.detailNotes}>{item.notes}</p>}
+            <div style={S.rowTags}>
+              {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => { onTag(t); onClose(); }}>{t}</button>)}
+            </div>
+          </>
+        )}
 
         <div style={S.commentsSection}>
           <h3 style={S.commentsHeading}>Discussion</h3>
           {comments.length === 0 && <div style={S.colEmpty}>No comments yet — be the first to add a clarification.</div>}
           {comments.map((c) => (
             <div key={c.id} style={S.commentRow}>
-              <div style={S.commentMeta}><strong>{c.authorName}</strong> · {timeAgo(c.createdAt)}</div>
+              <div style={S.commentMeta}>
+                <strong>{c.authorName}</strong> · {timeAgo(c.createdAt)}
+                {isAdmin && <button style={S.discussBtn} onClick={() => removeComment(c.id)}>Remove</button>}
+              </div>
               <div style={S.commentText}>{c.text}</div>
             </div>
           ))}
@@ -652,6 +772,81 @@ function SignInModal({ onClose }) {
               {sending ? "Sending…" : "Email me a sign-in link"}
             </button>
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdminPanel({ user, onClose }) {
+  const [admins, setAdmins] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getDocs(collection(db, "admins"))
+      .then((snap) => setAdmins(snap.docs.map((d) => ({ id: d.id, ...d.data() }))))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const addAdmin = async () => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await setDoc(doc(db, "admins", normalized), {
+        email: normalized,
+        addedBy: user.email,
+        addedAt: serverTimestamp(),
+      });
+      setAdmins((prev) => prev.some((a) => a.id === normalized) ? prev : [...prev, { id: normalized, email: normalized }]);
+      setEmail("");
+    } catch (err) {
+      setError(err.message || "Couldn't add admin.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeAdmin = async (id) => {
+    if (id === user.email.toLowerCase()) return; // don't let someone remove themselves
+    await deleteDoc(doc(db, "admins", id));
+    setAdmins((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+        <div style={S.modalHead}>
+          <h2 style={S.modalTitle}>Admins</h2>
+          <button style={S.closeBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+        <label style={S.field}>
+          <span style={S.fieldLabel}>Add an admin by email</span>
+          <input style={S.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="colleague@utrgv.edu" disabled={busy} />
+        </label>
+        {error && <div style={S.errorText}>{error}</div>}
+        <button
+          style={{ ...S.uploadBtn, width: "100%", justifyContent: "center", marginBottom: 16, opacity: email.trim() && !busy ? 1 : 0.5 }}
+          onClick={addAdmin} disabled={busy || !email.trim()}
+        >
+          Add admin
+        </button>
+        <div style={S.commentsHeading}>Current admins</div>
+        {loading ? (
+          <div style={S.colEmpty}>Loading…</div>
+        ) : (
+          admins.map((a) => (
+            <div key={a.id} style={S.adminRow}>
+              <span>{a.email}</span>
+              {a.id !== user.email.toLowerCase() && (
+                <button style={S.discussBtn} onClick={() => removeAdmin(a.id)}>Remove</button>
+              )}
+            </div>
+          ))
         )}
       </div>
     </div>
@@ -751,12 +946,15 @@ const S = {
   sourceToggleBtn: { flex: 1, border: "1px solid #DDE3E1", background: "#fff", color: "#5A6B78", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontWeight: 600, cursor: "pointer" },
   sourceToggleBtnActive: { background: "#12232C", color: "#fff", borderColor: "#12232C" },
   signInDivider: { textAlign: "center", color: "#93A1AC", fontSize: 12, margin: "14px 0" },
+  adminRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F0F3F1", fontSize: 13.5, color: "#12232C" },
   errorText: { color: "#B4573A", fontSize: 12.5, marginTop: 6 },
   progressTrack: { height: 6, background: "#EEF1F0", borderRadius: 999, marginTop: 12, overflow: "hidden" },
   progressFill: { height: "100%", background: "#5F9AB0", transition: "width 0.15s linear" },
 
   detailModal: { background: "#fff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto" },
-  detailMetaRow: { display: "flex", alignItems: "center", gap: 12, marginBottom: 14 },
+  detailMetaRow: { display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" },
+  adminActions: { display: "flex", gap: 12, marginLeft: "auto" },
+  deleteConfirm: { display: "flex", alignItems: "center", gap: 10, background: "#FBF3F0", border: "1px solid #F0DCD4", borderRadius: 9, padding: "10px 12px", fontSize: 13, color: "#7A3A28", marginBottom: 14 },
   detailMedia: { marginBottom: 14 },
   detailImg: { width: "100%", borderRadius: 10, display: "block" },
   detailYtIframe: { width: "100%", height: 280, border: "none", borderRadius: 10 },
@@ -766,7 +964,7 @@ const S = {
   commentsSection: { marginTop: 20, paddingTop: 16, borderTop: "1px solid #EAEDEB" },
   commentsHeading: { fontSize: 14, fontWeight: 700, margin: "0 0 10px", color: "#12232C" },
   commentRow: { padding: "8px 0", borderBottom: "1px solid #F0F3F1" },
-  commentMeta: { fontSize: 12, color: "#7B8794", marginBottom: 3 },
+  commentMeta: { fontSize: 12, color: "#7B8794", marginBottom: 3, display: "flex", alignItems: "center", gap: 10 },
   commentText: { fontSize: 13.5, color: "#12232C", lineHeight: 1.45, whiteSpace: "pre-wrap" },
   commentInputRow: { display: "flex", flexDirection: "column", gap: 8, marginTop: 12 },
 };
