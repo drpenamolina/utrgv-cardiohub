@@ -52,6 +52,34 @@ function getMedia(item) {
   return [];
 }
 
+// Lightweight, safe formatter: **bold**, __underline__, *italic*. No HTML parsing, so no injection risk.
+function formatInline(line, keyPrefix) {
+  const parts = [];
+  const regex = /\*\*(.+?)\*\*|__(.+?)__|\*(.+?)\*/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(line)) !== null) {
+    if (match.index > lastIndex) parts.push(line.slice(lastIndex, match.index));
+    if (match[1] !== undefined) parts.push(<strong key={`${keyPrefix}-${key++}`}>{match[1]}</strong>);
+    else if (match[2] !== undefined) parts.push(<u key={`${keyPrefix}-${key++}`}>{match[2]}</u>);
+    else if (match[3] !== undefined) parts.push(<em key={`${keyPrefix}-${key++}`}>{match[3]}</em>);
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < line.length) parts.push(line.slice(lastIndex));
+  return parts;
+}
+
+function formatText(text) {
+  if (!text) return null;
+  return text.split("\n").map((line, i) => (
+    <React.Fragment key={i}>
+      {i > 0 && <br />}
+      {formatInline(line, i)}
+    </React.Fragment>
+  ));
+}
+
 const WHATSAPP_LINK = "https://chat.whatsapp.com/your-group-invite";
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB
 const TAG_LIMIT = 10;
@@ -359,8 +387,8 @@ function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
           {item.title}
         </h3>
         {item.category === "questions"
-          ? (item.question && <p style={S.rowNotes}>{item.question}</p>)
-          : (item.notes && <p style={S.rowNotes}>{item.notes}</p>)}
+          ? (item.question && <p style={S.rowNotes}>{formatText(item.question)}</p>)
+          : (item.notes && <p style={S.rowNotes}>{formatText(item.notes)}</p>)}
         <div style={S.rowTags}>
           {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => onTag(t)}>{t}</button>)}
         </div>
@@ -439,8 +467,8 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
           {item.title}
         </h3>
         {item.category === "questions"
-          ? (item.question && <p style={S.cardNotes}>{item.question}</p>)
-          : (item.notes && <p style={S.cardNotes}>{item.notes}</p>)}
+          ? (item.question && <p style={S.cardNotes}>{formatText(item.question)}</p>)
+          : (item.notes && <p style={S.cardNotes}>{formatText(item.notes)}</p>)}
         <div style={S.cardTags}>{item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => onTag(t)}>{t}</button>)}</div>
         <div style={S.cardMeta}>
           <User size={12} color="#93A1AC" /> {item.uploaderName}<span style={S.metaDot}>·</span>{timeAgo(item.createdAt)}
@@ -449,6 +477,29 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
       </div>
       {playing && item.fileType === "audio" && <audio src={item.fileUrl} autoPlay onEnded={onPlay} style={{ display: "none" }} />}
     </article>
+  );
+}
+
+function FormatToolbar({ textareaRef, value, onChange, disabled }) {
+  const wrap = (marker) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const selected = value.slice(start, end) || "text";
+    const newValue = value.slice(0, start) + marker + selected + marker + value.slice(end);
+    onChange(newValue);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + marker.length, start + marker.length + selected.length);
+    });
+  };
+  return (
+    <div style={S.formatToolbar}>
+      <button type="button" style={S.formatBtn} onClick={() => wrap("**")} disabled={disabled} title="Bold"><strong>B</strong></button>
+      <button type="button" style={{ ...S.formatBtn, fontStyle: "italic" }} onClick={() => wrap("*")} disabled={disabled} title="Italic">I</button>
+      <button type="button" style={{ ...S.formatBtn, textDecoration: "underline" }} onClick={() => wrap("__")} disabled={disabled} title="Underline">U</button>
+    </div>
   );
 }
 
@@ -487,6 +538,8 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
   const [audioLinkUrl, setAudioLinkUrl] = useState("");
   const fileRef = useRef();
   const mediaRef = useRef();
+  const questionRef = useRef();
+  const answerRef = useRef();
 
   const isYoutube = category === "murmurs" && sourceMode === "youtube";
   const isAudioLink = category === "murmurs" && sourceMode === "link";
@@ -582,11 +635,13 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
           <>
             <label style={S.field}>
               <span style={S.fieldLabel}>Question</span>
-              <textarea style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="What the provider asked..." disabled={busy} />
+              <FormatToolbar textareaRef={questionRef} value={question} onChange={setQuestion} disabled={busy} />
+              <textarea ref={questionRef} style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="What the provider asked..." disabled={busy} />
             </label>
             <label style={S.field}>
               <span style={S.fieldLabel}>Answer</span>
-              <textarea style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="The correct answer / explanation" disabled={busy} />
+              <FormatToolbar textareaRef={answerRef} value={answer} onChange={setAnswer} disabled={busy} />
+              <textarea ref={answerRef} style={{ ...S.input, minHeight: 70, resize: "vertical" }} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="The correct answer / explanation" disabled={busy} />
             </label>
           </>
         ) : (
@@ -672,6 +727,8 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
   const [editExistingMedia, setEditExistingMedia] = useState([]);
   const [editNewMediaFiles, setEditNewMediaFiles] = useState([]);
   const editMediaRef = useRef();
+  const editQuestionRef = useRef();
+  const editAnswerRef = useRef();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -841,11 +898,13 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
               <>
                 <label style={S.field}>
                   <span style={S.fieldLabel}>Question</span>
-                  <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editQuestion} onChange={(e) => setEditQuestion(e.target.value)} />
+                  <FormatToolbar textareaRef={editQuestionRef} value={editQuestion} onChange={setEditQuestion} />
+                  <textarea ref={editQuestionRef} style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editQuestion} onChange={(e) => setEditQuestion(e.target.value)} />
                 </label>
                 <label style={S.field}>
                   <span style={S.fieldLabel}>Answer</span>
-                  <textarea style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editAnswer} onChange={(e) => setEditAnswer(e.target.value)} />
+                  <FormatToolbar textareaRef={editAnswerRef} value={editAnswer} onChange={setEditAnswer} />
+                  <textarea ref={editAnswerRef} style={{ ...S.input, minHeight: 60, resize: "vertical" }} value={editAnswer} onChange={(e) => setEditAnswer(e.target.value)} />
                 </label>
                 {editExistingMedia.length > 0 && (
                   <div style={S.mediaFileList}>
@@ -889,7 +948,7 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
         ) : item.category === "questions" ? (
           <>
             <div style={S.qaLabel}>Question</div>
-            <p style={S.detailNotes}>{item.question}</p>
+            <p style={S.detailNotes}>{formatText(item.question)}</p>
             {media.length > 0 && (
               <div style={S.detailMedia}>
                 {media.map((m, i) => (
@@ -900,7 +959,7 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
               </div>
             )}
             <div style={S.qaLabel}>Answer</div>
-            <p style={S.detailNotes}>{item.answer}</p>
+            <p style={S.detailNotes}>{formatText(item.answer)}</p>
             <div style={S.rowTags}>
               {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => { onTag(t); onClose(); }}>{t}</button>)}
             </div>
@@ -924,7 +983,7 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
               )}
             </div>
 
-            {item.notes && <p style={S.detailNotes}>{item.notes}</p>}
+            {item.notes && <p style={S.detailNotes}>{formatText(item.notes)}</p>}
             <div style={S.rowTags}>
               {item.tags.map((t) => <button key={t} style={S.miniTag} onClick={() => { onTag(t); onClose(); }}>{t}</button>)}
             </div>
@@ -940,7 +999,7 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
                 <strong>{c.authorName}</strong> · {timeAgo(c.createdAt)}
                 {isAdmin && <button style={S.discussBtn} onClick={() => removeComment(c.id)}>Remove</button>}
               </div>
-              <div style={S.commentText}>{c.text}</div>
+              <div style={S.commentText}>{formatText(c.text)}</div>
             </div>
           ))}
           {user ? (
@@ -1202,6 +1261,8 @@ const S = {
   sourceToggleBtn: { flex: 1, border: "1px solid #DDE3E1", background: "#fff", color: "#5A6B78", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontWeight: 600, cursor: "pointer" },
   sourceToggleBtnActive: { background: "#12232C", color: "#fff", borderColor: "#12232C" },
   mediaFileList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 8 },
+  formatToolbar: { display: "flex", gap: 4, marginBottom: 5 },
+  formatBtn: { width: 26, height: 24, border: "1px solid #DDE3E1", background: "#fff", color: "#3A4A54", borderRadius: 6, fontSize: 12.5, cursor: "pointer", display: "grid", placeItems: "center" },
   mediaFileRow: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "#3A4A54", background: "#F0F3F1", borderRadius: 7, padding: "6px 10px" },
   signInDivider: { textAlign: "center", color: "#93A1AC", fontSize: 12, margin: "14px 0" },
   adminRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F0F3F1", fontSize: 13.5, color: "#12232C" },
