@@ -466,12 +466,14 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
   const [mediaFiles, setMediaFiles] = useState([]);
   const [fileError, setFileError] = useState("");
   const [progress, setProgress] = useState(null); // null = idle, 0-1 while uploading
-  const [sourceMode, setSourceMode] = useState("file"); // "file" | "youtube" (murmurs only)
+  const [sourceMode, setSourceMode] = useState("file"); // "file" | "youtube" | "link" (murmurs only)
   const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [audioLinkUrl, setAudioLinkUrl] = useState("");
   const fileRef = useRef();
   const mediaRef = useRef();
 
   const isYoutube = category === "murmurs" && sourceMode === "youtube";
+  const isAudioLink = category === "murmurs" && sourceMode === "link";
   const isQuestions = category === "questions";
 
   const onFileChange = (e) => {
@@ -503,6 +505,10 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
       setFileError("Enter a valid YouTube link.");
       return;
     }
+    if (isAudioLink && !/^https?:\/\//.test(audioLinkUrl.trim())) {
+      setFileError("Enter a valid audio link (starting with http:// or https://).");
+      return;
+    }
     if (isQuestions && (!question.trim() || !answer.trim())) {
       setFileError("Enter both a question and an answer.");
       return;
@@ -516,8 +522,8 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
     try {
       await onAdd(
         {
-          file: isYoutube || isQuestions ? null : file,
-          fileUrl: isYoutube ? youtubeUrl.trim() : undefined,
+          file: isYoutube || isAudioLink || isQuestions ? null : file,
+          fileUrl: isYoutube ? youtubeUrl.trim() : isAudioLink ? audioLinkUrl.trim() : undefined,
           mediaFiles: isQuestions ? mediaFiles : undefined,
           title: title.trim(), category,
           tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
@@ -581,12 +587,18 @@ function UploadModal({ initialCategory, onClose, onAdd }) {
           <div style={S.sourceToggle}>
             <button type="button" style={{ ...S.sourceToggleBtn, ...(sourceMode === "file" ? S.sourceToggleBtnActive : {}) }} onClick={() => setSourceMode("file")} disabled={busy}>Upload file</button>
             <button type="button" style={{ ...S.sourceToggleBtn, ...(sourceMode === "youtube" ? S.sourceToggleBtnActive : {}) }} onClick={() => setSourceMode("youtube")} disabled={busy}>YouTube link</button>
+            <button type="button" style={{ ...S.sourceToggleBtn, ...(sourceMode === "link" ? S.sourceToggleBtnActive : {}) }} onClick={() => setSourceMode("link")} disabled={busy}>Audio link</button>
           </div>
         )}
         {isYoutube ? (
           <label style={S.field}>
             <span style={S.fieldLabel}>YouTube link</span>
             <input style={S.input} value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} placeholder="https://youtube.com/watch?v=..." disabled={busy} />
+          </label>
+        ) : isAudioLink ? (
+          <label style={S.field}>
+            <span style={S.fieldLabel}>Audio link <span style={S.hint}>direct link to an mp3/wav file</span></span>
+            <input style={S.input} value={audioLinkUrl} onChange={(e) => setAudioLinkUrl(e.target.value)} placeholder="https://example.edu/audio/murmur.mp3" disabled={busy} />
           </label>
         ) : isQuestions ? (
           <>
