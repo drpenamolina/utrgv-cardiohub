@@ -205,9 +205,12 @@ export default function SalinasCardio({ user }) {
 
       <header style={S.header}>
         <div style={S.headerInner}>
-          <div>
-            <div style={S.kicker}>Cardiology teaching library</div>
-            <h1 style={S.title}>UTRGV CardioHub</h1>
+          <div style={S.brandRow}>
+            <Logo size={40} />
+            <div>
+              <div style={S.kicker}>Cardiology teaching library</div>
+              <h1 style={S.title}>UTRGV CardioHub</h1>
+            </div>
           </div>
           <div style={S.headerActions}>
             <a href={WHATSAPP_LINK} target="_blank" rel="noreferrer" style={S.waBtn}>
@@ -402,7 +405,7 @@ function ColumnItem({ item, playing, onPlay, onTag, onOpen }) {
             <button type="button" style={S.showVideoBtn} onClick={() => setShowVideo((v) => !v)}>
               {showVideo ? "Hide video" : "Show video"}
             </button>
-            <div style={showVideo ? S.ytEmbedRow : S.ytHiddenEmbed}>
+            <div style={showVideo ? S.ytEmbedRow : S.ytCompactEmbed}>
               <iframe
                 width="100%" height="160" style={S.ytIframe}
                 src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1`}
@@ -429,31 +432,14 @@ function GridCard({ item, playing, onPlay, onTag, onOpen }) {
         {item.category === "ekg"
           ? (item.fileUrl ? <img src={item.fileUrl} alt={item.title} style={S.cardImg} /> : <EkgPreview color={cat.accent} />)
           : item.fileType === "youtube" ? (
-            playing ? (
-              showVideo && ytId ? (
+            playing && ytId ? (
+              <div style={showVideo ? S.ytFullEmbedCard : S.ytCompactEmbedCard}>
                 <iframe
                   style={S.ytIframe}
                   src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1`}
                   title={item.title} allow="autoplay; encrypted-media" allowFullScreen
                 />
-              ) : (
-                <>
-                  <button style={S.audioBtn} onClick={onPlay} aria-label="Pause heart sound">
-                    <span style={{ ...S.playCircle, background: cat.accent }}>
-                      <Pause size={22} color="#fff" />
-                    </span>
-                    <Waveform color={cat.accent} />
-                  </button>
-                  {ytId && (
-                    <div style={S.ytHiddenEmbed}>
-                      <iframe
-                        src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1`}
-                        title={item.title} allow="autoplay; encrypted-media"
-                      />
-                    </div>
-                  )}
-                </>
-              )
+              </div>
             ) : (
               <button style={S.ytThumbBtn} onClick={onPlay} aria-label="Play heart sound video">
                 {ytId && <img src={`https://img.youtube.com/vi/${ytId}/hqdefault.jpg`} alt="" style={S.cardImg} />}
@@ -538,6 +524,20 @@ function FormatToolbar({ textareaRef, value, onChange, disabled }) {
   );
 }
 
+function Logo({ size = 40 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        d="M24 41 C24 41 6 29.5 6 17.5 C6 10.5 11.5 5.5 18 5.5 C21 5.5 23.4 7 24 9.5 C24.6 7 27 5.5 30 5.5 C36.5 5.5 42 10.5 42 17.5 C42 29.5 24 41 24 41 Z"
+        fill="#D9636F"
+      />
+      <path
+        d="M4 24.5 H15 L18.5 15 L23 33 L27 12 L30.5 24.5 H44"
+        fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 function EkgPreview({ color }) {
   return (
     <svg viewBox="0 0 200 70" style={{ width: "100%", height: "100%" }} preserveAspectRatio="none">
@@ -754,7 +754,6 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
   const [deleting, setDeleting] = useState(false);
   const [pinning, setPinning] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
-  const [ytPlaying, setYtPlaying] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editCategory, setEditCategory] = useState("");
   const [editTags, setEditTags] = useState("");
@@ -1007,31 +1006,18 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
               {item.category === "ekg" && item.fileUrl && <img src={item.fileUrl} alt={item.title} style={S.detailImg} />}
               {item.fileType === "audio" && <audio src={item.fileUrl} controls style={{ width: "100%" }} />}
               {item.fileType === "youtube" && ytId && (
-                showVideo ? (
-                  <iframe
-                    style={S.detailYtIframe}
-                    src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1`}
-                    title={item.title} allow="autoplay; encrypted-media" allowFullScreen
-                  />
-                ) : (
-                  <div style={S.detailAudioOnly}>
-                    <button style={S.audioBtn} onClick={() => setYtPlaying((p) => !p)} aria-label={ytPlaying ? "Pause" : "Play audio"}>
-                      <span style={{ ...S.playCircle, background: cat.accent }}>
-                        {ytPlaying ? <Pause size={22} color="#fff" /> : <Play size={22} color="#fff" style={{ marginLeft: 2 }} />}
-                      </span>
-                    </button>
-                    {ytPlaying && <Waveform color={cat.accent} />}
-                    <button type="button" style={S.showVideoBtn} onClick={() => setShowVideo(true)}>Show video</button>
-                    {ytPlaying && (
-                      <div style={S.ytHiddenEmbed}>
-                        <iframe
-                          src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1`}
-                          title={item.title} allow="autoplay; encrypted-media"
-                        />
-                      </div>
-                    )}
+                <>
+                  <div style={showVideo ? S.detailYtWrap : S.detailYtCompactWrap}>
+                    <iframe
+                      style={S.detailYtIframe}
+                      src={`https://www.youtube-nocookie.com/embed/${ytId}`}
+                      title={item.title} allow="autoplay; encrypted-media" allowFullScreen
+                    />
                   </div>
-                )
+                  <button type="button" style={S.showVideoBtn} onClick={() => setShowVideo((v) => !v)}>
+                    {showVideo ? "Hide video" : "Show video"}
+                  </button>
+                </>
               )}
               {item.fileType === "pdf" && item.fileUrl && (
                 <a href={item.fileUrl} target="_blank" rel="noreferrer" style={S.detailPdfLink}>
@@ -1234,6 +1220,7 @@ const S = {
   app: { minHeight: "100vh", background: "#F5F6F4", color: "#12232C", fontFamily: "'Inter', system-ui, sans-serif", paddingBottom: 60 },
   header: { background: "#12232C", padding: "22px 20px 18px", position: "sticky", top: 0, zIndex: 20 },
   headerInner: { maxWidth: 1240, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" },
+  brandRow: { display: "flex", alignItems: "center", gap: 12 },
   kicker: { fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#5F9AB0", fontWeight: 600 },
   title: { fontFamily: "'Fraunces', Georgia, serif", fontSize: 34, fontWeight: 600, color: "#fff", margin: "2px 0 0", letterSpacing: "-0.01em" },
   headerActions: { display: "flex", gap: 10, alignItems: "center" },
@@ -1282,7 +1269,9 @@ const S = {
   discussBtn: { display: "inline-flex", alignItems: "center", gap: 3, border: "none", background: "none", color: "#8A5A9E", fontSize: 11, fontWeight: 600, cursor: "pointer", marginLeft: "auto", padding: 0 },
   ytEmbedRow: { marginTop: 10 },
   ytIframe: { width: "100%", height: "100%", border: "none", borderRadius: 8 },
-  ytHiddenEmbed: { position: "absolute", width: 1, height: 1, overflow: "hidden", opacity: 0, pointerEvents: "none" },
+  ytCompactEmbed: { width: "100%", maxWidth: 220, height: 110, marginTop: 10, borderRadius: 8, overflow: "hidden" },
+  ytCompactEmbedCard: { width: 130, height: 84, borderRadius: 8, overflow: "hidden" },
+  ytFullEmbedCard: { width: "100%", height: "100%" },
   showVideoBtn: { border: "none", background: "none", color: "#8A5A9E", fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, marginTop: 8 },
   showVideoBtnCard: { position: "absolute", bottom: 8, right: 8, border: "none", background: "rgba(18,35,44,0.72)", color: "#fff", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "4px 8px", borderRadius: 999 },
 
@@ -1336,8 +1325,9 @@ const S = {
   deleteConfirm: { display: "flex", alignItems: "center", gap: 10, background: "#FBF3F0", border: "1px solid #F0DCD4", borderRadius: 9, padding: "10px 12px", fontSize: 13, color: "#7A3A28", marginBottom: 14 },
   detailMedia: { marginBottom: 14 },
   detailImg: { width: "100%", borderRadius: 10, display: "block" },
-  detailYtIframe: { width: "100%", height: 280, border: "none", borderRadius: 10 },
-  detailAudioOnly: { display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "26px 0", background: "#F7F5F2", borderRadius: 10 },
+  detailYtIframe: { width: "100%", height: "100%", border: "none", borderRadius: 10 },
+  detailYtWrap: { width: "100%", height: 280, borderRadius: 10, overflow: "hidden" },
+  detailYtCompactWrap: { width: 220, height: 130, borderRadius: 10, overflow: "hidden", margin: "0 auto" },
   detailPdfLink: { display: "inline-flex", alignItems: "center", gap: 8, background: "#F0F3F1", color: "#12232C", borderRadius: 9, padding: "10px 14px", fontSize: 14, fontWeight: 600, textDecoration: "none" },
   detailNotes: { fontSize: 14, color: "#3A4A54", lineHeight: 1.5, margin: "0 0 10px" },
   qaLabel: { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#1F6F78", margin: "0 0 4px" },
