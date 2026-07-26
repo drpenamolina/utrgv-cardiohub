@@ -207,7 +207,7 @@ export default function SalinasCardio({ user }) {
         <div style={S.headerInner}>
           <div>
             <div style={S.kicker}>Cardiology teaching library</div>
-            <h1 style={S.title}>Salinas Cardio</h1>
+            <h1 style={S.title}>UTRGV CardioHub</h1>
           </div>
           <div style={S.headerActions}>
             <a href={WHATSAPP_LINK} target="_blank" rel="noreferrer" style={S.waBtn}>
