@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   FileText, HeartPulse, Activity, Stethoscope, Syringe,
   Search, Upload, X, Play, Pause, Tag, User, Plus, MessageCircle,
-  Columns, LayoutGrid, LogOut, ShieldCheck, Pencil, Trash2, HelpCircle, Pin, PinOff
+  Columns, LayoutGrid, LogOut, ShieldCheck, Pencil, Trash2, HelpCircle, Pin, PinOff, Loader2
 } from "lucide-react";
 import {
   collection, addDoc, onSnapshot, orderBy, query as fsQuery, serverTimestamp,
@@ -78,6 +78,22 @@ function formatText(text) {
       {formatInline(line, i)}
     </React.Fragment>
   ));
+}
+
+const MIME_BY_EXT = {
+  pdf: "application/pdf",
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp",
+  mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", ogg: "audio/ogg",
+  mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+};
+
+// Android's file picker (Drive, WhatsApp, some Files-app providers) often reports an
+// empty File.type, which Storage stores as application/octet-stream — Android Chrome then
+// force-downloads instead of previewing. Fall back to a guess from the extension.
+function guessContentType(file) {
+  if (file.type) return file.type;
+  const ext = file.name.split(".").pop().toLowerCase();
+  return MIME_BY_EXT[ext] || "application/octet-stream";
 }
 
 const WHATSAPP_LINK = "https://chat.whatsapp.com/your-group-invite";
@@ -168,7 +184,10 @@ export default function SalinasCardio({ user }) {
     if (file) {
       storagePath = `${meta.category}/${Date.now()}-${file.name}`;
       const storageRef = ref(storage, storagePath);
-      const task = uploadBytesResumable(storageRef, file);
+      const task = uploadBytesResumable(storageRef, file, {
+        contentType: guessContentType(file),
+        contentDisposition: "inline",
+      });
       await new Promise((resolve, reject) => {
         task.on(
           "state_changed",
@@ -188,7 +207,10 @@ export default function SalinasCardio({ user }) {
         const f = mediaFiles[i];
         const path = `${meta.category}/${Date.now()}-${i}-${f.name}`;
         const storageRef = ref(storage, path);
-        const task = uploadBytesResumable(storageRef, f);
+        const task = uploadBytesResumable(storageRef, f, {
+          contentType: guessContentType(f),
+          contentDisposition: "inline",
+        });
         await new Promise((resolve, reject) => {
           task.on(
             "state_changed",
@@ -787,6 +809,50 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
   const editQuestionRef = useRef();
   const editAnswerRef = useRef();
   const [saving, setSaving] = useState(false);
+  const [docLoading, setDocLoading] = useState(true);
+  const [docProgress, setDocProgress] = useState(0);
+  const [docBlobUrl, setDocBlobUrl] = useState(null);
+  const [docError, setDocError] = useState(false);
+
+  useEffect(() => {
+    setDocLoading(true);
+    setDocProgress(0);
+    setDocBlobUrl(null);
+    setDocError(false);
+    if (item?.fileType !== "pdf" || !item.fileUrl) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(item.fileUrl, { signal: controller.signal });
+        if (!res.ok || !res.body) throw new Error("Document fetch failed");
+        const total = Number(res.headers.get("content-length")) || 0;
+        const reader = res.body.getReader();
+        const chunks = [];
+        let received = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (total) setDocProgress(received / total);
+        }
+        if (cancelled) return;
+        const blob = new Blob(chunks, { type: "application/pdf" });
+        setDocBlobUrl(URL.createObjectURL(blob));
+        setDocLoading(false);
+      } catch (err) {
+        if (!cancelled && err.name !== "AbortError") {
+          setDocError(true);
+          setDocLoading(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; controller.abort(); };
+  }, [item?.id, item?.fileType, item?.fileUrl]);
+
+  useEffect(() => () => { if (docBlobUrl) URL.revokeObjectURL(docBlobUrl); }, [docBlobUrl]);
 
   useEffect(() => {
     if (!item) return;
@@ -1041,9 +1107,32 @@ function DetailModal({ item, user, isAdmin, onRequestSignIn, onClose, onTag }) {
                 </>
               )}
               {item.fileType === "pdf" && item.fileUrl && (
-                <a href={item.fileUrl} target="_blank" rel="noreferrer" style={S.detailPdfLink}>
-                  <FileText size={18} /> Open document
-                </a>
+                <>
+                  <div style={S.docViewerWrap}>
+                    {docBlobUrl && !docError && (
+                      <iframe key={item.id} src={docBlobUrl} title={item.title} style={S.docViewerFrame} />
+                    )}
+                    {docLoading && !docError && (
+                      <div style={S.docViewerOverlay}>
+                        <Loader2 className="uc-spin" size={22} color="#5A6B78" />
+                        <span>{docProgress > 0 ? `Loading document — ${Math.round(docProgress * 100)}%` : "Loading document…"}</span>
+                        {docProgress > 0 && (
+                          <div style={{ ...S.progressTrack, width: 160, marginTop: 0 }}>
+                            <div style={{ ...S.progressFill, width: `${Math.round(docProgress * 100)}%` }} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {docError && (
+                      <div style={S.docViewerOverlay}>
+                        <span>Couldn't preview this document inline — use the link below instead.</span>
+                      </div>
+                    )}
+                  </div>
+                  <a href={item.fileUrl} target="_blank" rel="noreferrer" style={S.detailPdfLink}>
+                    <FileText size={18} /> Open in new tab
+                  </a>
+                </>
               )}
             </div>
 
@@ -1351,6 +1440,9 @@ const S = {
   detailYtWrap: { width: "100%", height: 280, borderRadius: 10, overflow: "hidden" },
   detailYtCompactWrap: { width: 220, height: 130, borderRadius: 10, overflow: "hidden", margin: "0 auto" },
   detailPdfLink: { display: "inline-flex", alignItems: "center", gap: 8, background: "#F0F3F1", color: "#12232C", borderRadius: 9, padding: "10px 14px", fontSize: 14, fontWeight: 600, textDecoration: "none" },
+  docViewerWrap: { position: "relative", borderRadius: 10, overflow: "hidden", marginBottom: 10, background: "#F0F3F1", height: "60vh" },
+  docViewerFrame: { width: "100%", height: "100%", border: "none", display: "block" },
+  docViewerOverlay: { position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, background: "#F0F3F1", color: "#5A6B78", fontSize: 13, textAlign: "center", padding: 20 },
   detailNotes: { fontSize: 14, color: "#3A4A54", lineHeight: 1.5, margin: "0 0 10px" },
   qaLabel: { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#1F6F78", margin: "0 0 4px" },
 
@@ -1379,6 +1471,8 @@ const GLOBAL_CSS = `
 body { margin: 0; }
 .wf-bar { width: 3px; border-radius: 2px; animation: wf 0.7s ease-in-out infinite alternate; }
 @keyframes wf { to { transform: scaleY(0.4); } }
+.uc-spin { animation: uc-spin 0.8s linear infinite; }
+@keyframes uc-spin { to { transform: rotate(360deg); } }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #5F9AB0; outline-offset: 2px; }
 .colBody::-webkit-scrollbar { width: 6px; }
 .colBody::-webkit-scrollbar-thumb { background: #D4DAD6; border-radius: 3px; }
