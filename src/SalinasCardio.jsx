@@ -12,6 +12,14 @@ import { ref, uploadBytesResumable, uploadBytes, getDownloadURL, deleteObject } 
 import { signOut, signInWithPopup, sendSignInLinkToEmail } from "firebase/auth";
 import { auth, db, storage, googleProvider } from "./firebase";
 
+function WhatsAppIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.39 1.26 4.81L2 22l5.42-1.42a9.9 9.9 0 0 0 4.62 1.18h.01c5.46 0 9.9-4.45 9.9-9.91C21.95 6.45 17.5 2 12.04 2zm5.8 14.13c-.24.68-1.4 1.3-1.93 1.38-.49.08-1.11.11-1.8-.11-.41-.13-.95-.31-1.63-.6-2.87-1.24-4.74-4.12-4.88-4.31-.14-.19-1.17-1.56-1.17-2.98 0-1.42.74-2.11 1.01-2.4.26-.29.57-.36.76-.36.19 0 .38 0 .55.01.18.01.41-.07.64.49.24.58.81 2 .88 2.15.07.15.12.32.02.51-.1.19-.15.31-.29.48-.15.17-.31.38-.44.51-.15.15-.3.31-.13.6.17.29.76 1.25 1.63 2.03 1.12 1 2.06 1.31 2.35 1.46.29.15.46.13.63-.08.17-.21.72-.84.92-1.13.19-.29.39-.24.65-.14.26.1 1.68.79 1.97.94.29.15.48.22.55.34.07.13.07.72-.17 1.4z"/>
+    </svg>
+  );
+}
+
 /* ============================================================
    SALINAS CARDIO — teaching library (v2, column board)
    ------------------------------------------------------------
@@ -96,7 +104,7 @@ function guessContentType(file) {
   return MIME_BY_EXT[ext] || "application/octet-stream";
 }
 
-const WHATSAPP_LINK = "https://chat.whatsapp.com/your-group-invite";
+const WHATSAPP_LINK = "https://chat.whatsapp.com/IIGQuke0fzwEYW9Hxgo7yI?mode=gi_t";
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB
 const TAG_LIMIT = 10;
 
@@ -249,7 +257,7 @@ export default function SalinasCardio({ user }) {
           </div>
           <div style={S.headerActions}>
             <a href={WHATSAPP_LINK} target="_blank" rel="noreferrer" style={S.waBtn}>
-              <MessageCircle size={16} /> Discussion
+              <WhatsAppIcon size={16} /> Discussion
             </a>
             <button style={S.uploadBtn} onClick={() => openUpload("articles")}>
               <Plus size={16} /> Upload
